@@ -30,7 +30,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           }
           pageMap={await getPageMap()}
           docsRepositoryBase="https://github.com/Shin-sibainu/ccmux/tree/master/docs"
-          footer={<Footer>MIT License © ccmux</Footer>}
+          footer={<Footer>MIT License © ccmux — <a href="https://claude-code-academy.dev" target="_blank" rel="noopener" style={{color: '#d97757'}}>Claude Code Academy</a></Footer>}
         >
           {children}
         </Layout>
