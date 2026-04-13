@@ -22,8 +22,24 @@ A lightweight terminal multiplexer built specifically for running multiple [Clau
 
 ## Install
 
+### Download binary (recommended)
+
+Download the latest binary from [Releases](https://github.com/Shin-sibainu/ccmux/releases):
+
+| Platform | File |
+|----------|------|
+| Windows (x64) | `ccmux-windows-x64.exe` |
+| macOS (Apple Silicon) | `ccmux-macos-arm64` |
+| macOS (Intel) | `ccmux-macos-x64` |
+| Linux (x64) | `ccmux-linux-x64` |
+
+> **Windows:** Microsoft Defender SmartScreen may show a warning because the binary is not code-signed. Click "More info" → "Run anyway" to proceed. This is normal for unsigned open-source software.
+
+> **macOS/Linux:** After downloading, make the binary executable: `chmod +x ccmux-*`
+
+### From source
+
 ```bash
-# From source
 git clone https://github.com/Shin-sibainu/ccmux.git
 cd ccmux
 cargo build --release

@@ -8,6 +8,27 @@
 
 ## インストール
 
+### バイナリをダウンロード（推奨）
+
+[Releases](https://github.com/Shin-sibainu/ccmux/releases) から最新バイナリをダウンロード：
+
+| プラットフォーム | ファイル |
+|-----------------|---------|
+| Windows (x64) | `ccmux-windows-x64.exe` |
+| macOS (Apple Silicon) | `ccmux-macos-arm64` |
+| macOS (Intel) | `ccmux-macos-x64` |
+| Linux (x64) | `ccmux-linux-x64` |
+
+import { Callout } from 'nextra/components'
+
+<Callout type="warning">
+  **Windows の場合:** Microsoft Defender SmartScreen の警告が表示されることがあります。これはコード署名がないためで、マルウェアではありません。「詳細情報」→「実行」で起動できます。
+</Callout>
+
+<Callout type="info">
+  **macOS / Linux の場合:** ダウンロード後に実行権限を付与してください: `chmod +x ccmux-*`
+</Callout>
+
 ### ソースからビルド
 
 ```bash
@@ -17,16 +38,6 @@ cargo build --release
 ```
 
 バイナリは `target/release/ccmux`（Windows は `ccmux.exe`）に生成されます。
-
-### PATH に追加（任意）
-
-```bash
-# Linux / macOS
-cp target/release/ccmux ~/.local/bin/
-
-# Windows (PowerShell)
-Copy-Item target\release\ccmux.exe $env:USERPROFILE\.local\bin\
-```
 
 ## 初回起動
 
