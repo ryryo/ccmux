@@ -32,13 +32,15 @@ pub enum SplitDirection {
 pub enum FocusTarget {
     Pane,
     FileTree,
+    Preview,
 }
 
 /// Which border is being dragged.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DragTarget {
     FileTreeBorder,
     PreviewBorder,
+    PaneSplit(Vec<bool>, SplitDirection, Rect), // path, direction, area of the split node
 }
 
 // ─── Layout Tree ──────────────────────────────────────────
@@ -48,6 +50,7 @@ pub enum LayoutNode {
     Leaf { pane_id: usize },
     Split {
         direction: SplitDirection,
+        ratio: f32, // 0.0..1.0, portion allocated to first child
         first: Box<LayoutNode>,
         second: Box<LayoutNode>,
     },
@@ -68,8 +71,8 @@ impl LayoutNode {
     pub fn calculate_rects(&self, area: Rect) -> Vec<(usize, Rect)> {
         match self {
             LayoutNode::Leaf { pane_id } => vec![(*pane_id, area)],
-            LayoutNode::Split { direction, first, second } => {
-                let (first_area, second_area) = split_rect(area, *direction);
+            LayoutNode::Split { direction, ratio, first, second } => {
+                let (first_area, second_area) = split_rect(area, *direction, *ratio);
                 let mut result = first.calculate_rects(first_area);
                 result.extend(second.calculate_rects(second_area));
                 result
@@ -84,6 +87,7 @@ impl LayoutNode {
                     let old_id = *pane_id;
                     *self = LayoutNode::Split {
                         direction,
+                        ratio: 0.5,
                         first: Box::new(LayoutNode::Leaf { pane_id: old_id }),
                         second: Box::new(LayoutNode::Leaf { pane_id: new_id }),
                     };
@@ -122,6 +126,55 @@ impl LayoutNode {
         }
     }
 
+    /// Find the split boundary position and direction for hit testing.
+    /// Returns a list of (boundary_position, direction, depth) for each Split node.
+    pub fn split_boundaries(&self, area: Rect) -> Vec<(u16, SplitDirection, Vec<bool>)> {
+        let mut result = Vec::new();
+        self.collect_boundaries(area, &mut Vec::new(), &mut result);
+        result
+    }
+
+    fn collect_boundaries(
+        &self,
+        area: Rect,
+        path: &mut Vec<bool>, // false=first, true=second
+        result: &mut Vec<(u16, SplitDirection, Vec<bool>)>,
+    ) {
+        if let LayoutNode::Split { direction, ratio, first, second } = self {
+            let (first_area, second_area) = split_rect(area, *direction, *ratio);
+
+            // The boundary is at the edge between first and second
+            let boundary = match direction {
+                SplitDirection::Vertical => first_area.x + first_area.width,
+                SplitDirection::Horizontal => first_area.y + first_area.height,
+            };
+            result.push((boundary, *direction, path.clone()));
+
+            path.push(false);
+            first.collect_boundaries(first_area, path, result);
+            path.pop();
+
+            path.push(true);
+            second.collect_boundaries(second_area, path, result);
+            path.pop();
+        }
+    }
+
+    /// Update ratio by path (path identifies which Split node).
+    pub fn update_ratio(&mut self, path: &[bool], new_ratio: f32) {
+        if path.is_empty() {
+            if let LayoutNode::Split { ratio, .. } = self {
+                *ratio = new_ratio.clamp(0.15, 0.85);
+            }
+        } else if let LayoutNode::Split { first, second, .. } = self {
+            if path[0] {
+                second.update_ratio(&path[1..], new_ratio);
+            } else {
+                first.update_ratio(&path[1..], new_ratio);
+            }
+        }
+    }
+
     pub fn pane_count(&self) -> usize {
         match self {
             LayoutNode::Leaf { .. } => 1,
@@ -130,20 +183,23 @@ impl LayoutNode {
     }
 }
 
-fn split_rect(area: Rect, direction: SplitDirection) -> (Rect, Rect) {
+fn split_rect(area: Rect, direction: SplitDirection, ratio: f32) -> (Rect, Rect) {
+    let ratio = ratio.clamp(0.1, 0.9);
     match direction {
         SplitDirection::Vertical => {
-            let half = area.width / 2;
+            let first_w = (area.width as f32 * ratio) as u16;
+            let first_w = first_w.max(1).min(area.width.saturating_sub(1));
             (
-                Rect::new(area.x, area.y, half, area.height),
-                Rect::new(area.x + half, area.y, area.width - half, area.height),
+                Rect::new(area.x, area.y, first_w, area.height),
+                Rect::new(area.x + first_w, area.y, area.width - first_w, area.height),
             )
         }
         SplitDirection::Horizontal => {
-            let half = area.height / 2;
+            let first_h = (area.height as f32 * ratio) as u16;
+            let first_h = first_h.max(1).min(area.height.saturating_sub(1));
             (
-                Rect::new(area.x, area.y, area.width, half),
-                Rect::new(area.x, area.y + half, area.width, area.height - half),
+                Rect::new(area.x, area.y, area.width, first_h),
+                Rect::new(area.x, area.y + first_h, area.width, area.height - first_h),
             )
         }
     }
@@ -295,6 +351,11 @@ impl App {
             return Ok(true);
         }
 
+        // Preview mode
+        if self.ws().focus_target == FocusTarget::Preview {
+            return self.handle_preview_key(key);
+        }
+
         // File tree mode
         if self.ws().focus_target == FocusTarget::FileTree {
             if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('f') {
@@ -329,7 +390,12 @@ impl App {
                 Ok(true)
             }
             (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
-                if multi_pane {
+                if self.ws().focus_target == FocusTarget::Preview {
+                    // Close preview and return to pane
+                    self.ws_mut().preview.close();
+                    self.ws_mut().focus_target = FocusTarget::Pane;
+                    Ok(true)
+                } else if multi_pane {
                     self.close_focused_pane();
                     Ok(true)
                 } else if multi_tab {
@@ -367,6 +433,53 @@ impl App {
             KeyCode::Esc => {
                 // Return to pane, keep preview open
                 self.ws_mut().focus_target = FocusTarget::Pane;
+                Ok(true)
+            }
+            _ => Ok(true),
+        }
+    }
+
+    fn handle_preview_key(&mut self, key: KeyEvent) -> Result<bool> {
+        match (key.modifiers, key.code) {
+            (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
+                self.ws_mut().preview.close();
+                self.ws_mut().focus_target = FocusTarget::Pane;
+                Ok(true)
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
+                self.layout_swapped = !self.layout_swapped;
+                Ok(true)
+            }
+            (_, KeyCode::Char('j')) | (_, KeyCode::Down) => {
+                self.ws_mut().preview.scroll_down(1);
+                Ok(true)
+            }
+            (_, KeyCode::Char('k')) | (_, KeyCode::Up) => {
+                self.ws_mut().preview.scroll_up(1);
+                Ok(true)
+            }
+            (_, KeyCode::PageDown) => {
+                self.ws_mut().preview.scroll_down(20);
+                Ok(true)
+            }
+            (_, KeyCode::PageUp) => {
+                self.ws_mut().preview.scroll_up(20);
+                Ok(true)
+            }
+            (_, KeyCode::Esc) => {
+                self.ws_mut().focus_target = FocusTarget::Pane;
+                Ok(true)
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('q')) => {
+                self.should_quit = true;
+                Ok(true)
+            }
+            (KeyModifiers::CONTROL, KeyCode::Right) => {
+                self.focus_next_pane();
+                Ok(true)
+            }
+            (KeyModifiers::CONTROL, KeyCode::Left) => {
+                self.focus_prev_pane();
                 Ok(true)
             }
             _ => Ok(true),
@@ -483,51 +596,81 @@ impl App {
         }
     }
 
-    /// Cycle focus forward: FileTree → Pane1 → Pane2 → ... → FileTree
+    /// Cycle focus forward: FileTree → Preview → Pane1 → Pane2 → ... → FileTree
     fn focus_next_pane(&mut self) {
         let ws = self.ws_mut();
         let ids = ws.layout.collect_pane_ids();
         let tree_visible = ws.file_tree_visible;
+        let preview_active = ws.preview.is_active();
+        let _swapped = false; // preview position doesn't affect focus order
 
-        if ws.focus_target == FocusTarget::FileTree {
-            // File tree → first pane
-            ws.focus_target = FocusTarget::Pane;
-        } else if let Some(idx) = ids.iter().position(|&id| id == ws.focused_pane_id) {
-            if idx + 1 < ids.len() {
-                // Next pane
-                ws.focused_pane_id = ids[idx + 1];
-            } else if tree_visible {
-                // Last pane → file tree
-                ws.focus_target = FocusTarget::FileTree;
-            } else {
-                // Wrap to first pane
-                ws.focused_pane_id = ids[0];
+        match ws.focus_target {
+            FocusTarget::FileTree => {
+                // File tree → preview (if active) or first pane
+                if preview_active {
+                    ws.focus_target = FocusTarget::Preview;
+                } else {
+                    ws.focus_target = FocusTarget::Pane;
+                }
+            }
+            FocusTarget::Preview => {
+                // Preview → first pane
+                ws.focus_target = FocusTarget::Pane;
+            }
+            FocusTarget::Pane => {
+                if let Some(idx) = ids.iter().position(|&id| id == ws.focused_pane_id) {
+                    if idx + 1 < ids.len() {
+                        ws.focused_pane_id = ids[idx + 1];
+                    } else if tree_visible {
+                        ws.focus_target = FocusTarget::FileTree;
+                    } else if preview_active {
+                        ws.focus_target = FocusTarget::Preview;
+                    } else {
+                        ws.focused_pane_id = ids[0];
+                    }
+                }
             }
         }
     }
 
-    /// Cycle focus backward: FileTree ← Pane1 ← Pane2 ← ... ← FileTree
+    /// Cycle focus backward
     fn focus_prev_pane(&mut self) {
         let ws = self.ws_mut();
         let ids = ws.layout.collect_pane_ids();
         let tree_visible = ws.file_tree_visible;
+        let preview_active = ws.preview.is_active();
 
-        if ws.focus_target == FocusTarget::FileTree {
-            // File tree → last pane
-            ws.focus_target = FocusTarget::Pane;
-            if let Some(&last) = ids.last() {
-                ws.focused_pane_id = last;
+        match ws.focus_target {
+            FocusTarget::FileTree => {
+                // File tree → last pane
+                ws.focus_target = FocusTarget::Pane;
+                if let Some(&last) = ids.last() {
+                    ws.focused_pane_id = last;
+                }
             }
-        } else if let Some(idx) = ids.iter().position(|&id| id == ws.focused_pane_id) {
-            if idx > 0 {
-                // Previous pane
-                ws.focused_pane_id = ids[idx - 1];
-            } else if tree_visible {
-                // First pane → file tree
-                ws.focus_target = FocusTarget::FileTree;
-            } else {
-                // Wrap to last pane
-                ws.focused_pane_id = ids[ids.len() - 1];
+            FocusTarget::Preview => {
+                // Preview → file tree (if visible) or last pane
+                if tree_visible {
+                    ws.focus_target = FocusTarget::FileTree;
+                } else {
+                    ws.focus_target = FocusTarget::Pane;
+                    if let Some(&last) = ids.last() {
+                        ws.focused_pane_id = last;
+                    }
+                }
+            }
+            FocusTarget::Pane => {
+                if let Some(idx) = ids.iter().position(|&id| id == ws.focused_pane_id) {
+                    if idx > 0 {
+                        ws.focused_pane_id = ids[idx - 1];
+                    } else if preview_active {
+                        ws.focus_target = FocusTarget::Preview;
+                    } else if tree_visible {
+                        ws.focus_target = FocusTarget::FileTree;
+                    } else {
+                        ws.focused_pane_id = ids[ids.len() - 1];
+                    }
+                }
             }
         }
     }
@@ -584,7 +727,7 @@ impl App {
                     }
                 }
 
-                // Check border drag
+                // Check border drag (file tree / preview)
                 if self.is_on_file_tree_border(col) {
                     self.dragging = Some(DragTarget::FileTreeBorder);
                     return;
@@ -592,6 +735,35 @@ impl App {
                 if self.is_on_preview_border(col) {
                     self.dragging = Some(DragTarget::PreviewBorder);
                     return;
+                }
+
+                // Check pane split border drag
+                if let Some(pane_area) = self.ws().last_pane_rects.first().map(|_| {
+                    // Compute the total pane area from all pane rects
+                    let rects = &self.ws().last_pane_rects;
+                    let min_x = rects.iter().map(|(_, r)| r.x).min().unwrap_or(0);
+                    let min_y = rects.iter().map(|(_, r)| r.y).min().unwrap_or(0);
+                    let max_x = rects.iter().map(|(_, r)| r.x + r.width).max().unwrap_or(0);
+                    let max_y = rects.iter().map(|(_, r)| r.y + r.height).max().unwrap_or(0);
+                    Rect::new(min_x, min_y, max_x - min_x, max_y - min_y)
+                }) {
+                    let boundaries = self.ws().layout.split_boundaries(pane_area);
+                    for (boundary, direction, path) in boundaries {
+                        let on_border = match direction {
+                            SplitDirection::Vertical => {
+                                col >= boundary.saturating_sub(1) && col <= boundary
+                                    && row >= pane_area.y && row < pane_area.y + pane_area.height
+                            }
+                            SplitDirection::Horizontal => {
+                                row >= boundary.saturating_sub(1) && row <= boundary
+                                    && col >= pane_area.x && col < pane_area.x + pane_area.width
+                            }
+                        };
+                        if on_border {
+                            self.dragging = Some(DragTarget::PaneSplit(path, direction, pane_area));
+                            return;
+                        }
+                    }
                 }
 
                 // Check file tree click
@@ -615,6 +787,16 @@ impl App {
                     }
                 }
 
+                // Check preview click
+                if let Some(rect) = self.ws().last_preview_rect {
+                    if col >= rect.x && col < rect.x + rect.width
+                        && row >= rect.y && row < rect.y + rect.height
+                    {
+                        self.ws_mut().focus_target = FocusTarget::Preview;
+                        return;
+                    }
+                }
+
                 // Check pane clicks
                 let pane_rects = self.ws().last_pane_rects.clone();
                 for (pane_id, rect) in pane_rects {
@@ -629,25 +811,34 @@ impl App {
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 let col = mouse.column;
-                if let Some(target) = self.dragging {
+                let row = mouse.row;
+                if let Some(ref target) = self.dragging.clone() {
                     match target {
                         DragTarget::FileTreeBorder => {
-                            self.file_tree_width = col.max(10).min(60);
+                            self.file_tree_width = col.clamp(10, 60);
                         }
                         DragTarget::PreviewBorder => {
                             if let Some(rect) = self.ws().last_preview_rect {
                                 if self.layout_swapped {
-                                    // [tree][preview][panes] → dragging right edge
-                                    // preview_width = col - preview_rect.x
-                                    let new_width = col.saturating_sub(rect.x).max(15).min(80);
+                                    let new_width = col.saturating_sub(rect.x).clamp(15, 80);
                                     self.preview_width = new_width;
                                 } else {
-                                    // [tree][panes][preview] → dragging left edge
                                     let total_right = rect.x + rect.width;
-                                    let new_width = total_right.saturating_sub(col).max(15).min(80);
+                                    let new_width = total_right.saturating_sub(col).clamp(15, 80);
                                     self.preview_width = new_width;
                                 }
                             }
+                        }
+                        DragTarget::PaneSplit(path, direction, area) => {
+                            let new_ratio = match direction {
+                                SplitDirection::Vertical => {
+                                    (col.saturating_sub(area.x) as f32) / area.width.max(1) as f32
+                                }
+                                SplitDirection::Horizontal => {
+                                    (row.saturating_sub(area.y) as f32) / area.height.max(1) as f32
+                                }
+                            };
+                            self.ws_mut().layout.update_ratio(path, new_ratio);
                         }
                     }
                 }
@@ -721,7 +912,7 @@ impl App {
             }
             MouseEventKind::Moved => {
                 let col = mouse.column;
-                let old_hover = self.hover_border;
+                let old_hover = self.hover_border.clone();
                 if self.is_on_file_tree_border(col) {
                     self.hover_border = Some(DragTarget::FileTreeBorder);
                 } else if self.is_on_preview_border(col) {
@@ -799,7 +990,7 @@ impl App {
 }
 
 /// Extract directory name from a path for tab title.
-fn dir_name(path: &PathBuf) -> String {
+fn dir_name(path: &std::path::Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| path.to_string_lossy().to_string())
@@ -905,6 +1096,7 @@ mod tests {
     fn test_calculate_rects_vertical() {
         let layout = LayoutNode::Split {
             direction: SplitDirection::Vertical,
+            ratio: 0.5,
             first: Box::new(LayoutNode::Leaf { pane_id: 1 }),
             second: Box::new(LayoutNode::Leaf { pane_id: 2 }),
         };
@@ -918,6 +1110,7 @@ mod tests {
     fn test_calculate_rects_horizontal() {
         let layout = LayoutNode::Split {
             direction: SplitDirection::Horizontal,
+            ratio: 0.5,
             first: Box::new(LayoutNode::Leaf { pane_id: 1 }),
             second: Box::new(LayoutNode::Leaf { pane_id: 2 }),
         };

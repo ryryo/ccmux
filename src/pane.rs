@@ -20,6 +20,7 @@ pub struct Pane {
     last_rows: u16,
     last_cols: u16,
     pub exited: bool,
+    pub title: Arc<Mutex<String>>,
 }
 
 impl Pane {
@@ -68,6 +69,7 @@ impl Pane {
 
         // Scrollback buffer: 10000 lines of history
         let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 10000)));
+        let pane_title = Arc::new(Mutex::new(String::new()));
 
         let reader = pair
             .master
@@ -75,8 +77,9 @@ impl Pane {
             .context("Failed to clone PTY reader")?;
 
         let parser_clone = Arc::clone(&parser);
+        let title_clone = Arc::clone(&pane_title);
         let reader_handle = thread::spawn(move || {
-            pty_reader_thread(reader, parser_clone, id, event_tx);
+            pty_reader_thread(reader, parser_clone, title_clone, id, event_tx);
         });
 
         let mut pane = Self {
@@ -89,6 +92,7 @@ impl Pane {
             last_rows: rows,
             last_cols: cols,
             exited: false,
+            title: pane_title,
         };
 
         // Inject OSC 7 hook after shell starts
@@ -178,6 +182,16 @@ impl Pane {
         parser.screen().scrollback() > 0
     }
 
+    /// Check if Claude Code is running in this pane (by window title).
+    pub fn is_claude_running(&self) -> bool {
+        if let Ok(t) = self.title.lock() {
+            let lower = t.to_lowercase();
+            lower.contains("claude")
+        } else {
+            false
+        }
+    }
+
     /// Kill the PTY child process.
     pub fn kill(&mut self) {
         let _ = self.child.kill();
@@ -195,6 +209,7 @@ impl Drop for Pane {
 fn pty_reader_thread(
     mut reader: Box<dyn Read + Send>,
     parser: Arc<Mutex<vt100::Parser>>,
+    title: Arc<Mutex<String>>,
     pane_id: usize,
     event_tx: Sender<AppEvent>,
 ) {
@@ -208,9 +223,16 @@ fn pty_reader_thread(
             Ok(n) => {
                 let data = &buf[..n];
 
-                // Detect OSC 7 (cwd notification) before passing to vt100
+                // Detect OSC 7 (cwd notification)
                 if let Some(path) = extract_osc7(data) {
                     let _ = event_tx.send(AppEvent::CwdChanged(pane_id, path));
+                }
+
+                // Detect OSC 0/2 (window title) — used to detect Claude Code
+                if let Some(new_title) = extract_osc_title(data) {
+                    if let Ok(mut t) = title.lock() {
+                        *t = new_title;
+                    }
                 }
 
                 let mut parser = parser.lock().unwrap_or_else(|e| e.into_inner());
@@ -236,7 +258,7 @@ fn extract_osc7(data: &[u8]) -> Option<PathBuf> {
 
     // Find the terminator: BEL (\x07) or ST (\x1b\\)
     let end = rest.find('\x07')
-        .or_else(|| rest.find("\x1b\\").map(|i| i));
+        .or_else(|| rest.find("\x1b\\"));
 
     let uri = &rest[..end?];
 
@@ -274,6 +296,23 @@ fn extract_osc7(data: &[u8]) -> Option<PathBuf> {
         return Some(PathBuf::from(path));
     }
 
+    None
+}
+
+/// Extract window title from OSC 0 or OSC 2: \x1b]0;TITLE\x07 or \x1b]2;TITLE\x07
+fn extract_osc_title(data: &[u8]) -> Option<String> {
+    let s = std::str::from_utf8(data).ok()?;
+    // Look for OSC 0 or OSC 2
+    for marker in &["\x1b]0;", "\x1b]2;"] {
+        if let Some(start) = s.find(marker) {
+            let rest = &s[start + marker.len()..];
+            let end = rest.find('\x07')
+                .or_else(|| rest.find("\x1b\\"));
+            if let Some(end) = end {
+                return Some(rest[..end].to_string());
+            }
+        }
+    }
     None
 }
 
