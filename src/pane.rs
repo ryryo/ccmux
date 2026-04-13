@@ -41,20 +41,16 @@ impl Pane {
         let shell = detect_shell();
         let mut cmd = CommandBuilder::new(&shell);
 
-        // Launch as login shell for proper profile loading (.bashrc, .zshrc, etc.)
         let shell_name = shell
             .file_name()
             .map(|n| n.to_string_lossy().to_lowercase())
             .unwrap_or_default();
-        if shell_name.contains("bash") {
-            cmd.arg("--login");
-        } else if shell_name.contains("zsh") {
+
+        if shell_name.contains("bash") || shell_name.contains("zsh") {
             cmd.arg("--login");
         }
 
         cmd.cwd(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-
-        // Set TERM for proper terminal behavior
         cmd.env("TERM", "xterm-256color");
 
         let child = pair
@@ -70,7 +66,8 @@ impl Pane {
             .take_writer()
             .context("Failed to take PTY writer")?;
 
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 0)));
+        // Scrollback buffer: 10000 lines of history
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 10000)));
 
         let reader = pair
             .master
@@ -82,7 +79,7 @@ impl Pane {
             pty_reader_thread(reader, parser_clone, id, event_tx);
         });
 
-        Ok(Self {
+        let mut pane = Self {
             id,
             master: pair.master,
             writer,
@@ -92,7 +89,27 @@ impl Pane {
             last_rows: rows,
             last_cols: cols,
             exited: false,
-        })
+        };
+
+        // Inject OSC 7 hook after shell starts
+        // Leading space prevents it from appearing in bash history
+        if shell_name.contains("bash") {
+            let setup = concat!(
+                " __ccmux_osc7() { printf '\\033]7;file://%s%s\\007' \"$HOSTNAME\" \"$PWD\"; };",
+                " PROMPT_COMMAND=\"__ccmux_osc7;${PROMPT_COMMAND}\";",
+                " clear\n",
+            );
+            let _ = pane.write_input(setup.as_bytes());
+        } else if shell_name.contains("zsh") {
+            let setup = concat!(
+                " __ccmux_osc7() { printf '\\033]7;file://%s%s\\007' \"$HOST\" \"$PWD\"; };",
+                " precmd_functions+=(__ccmux_osc7);",
+                " clear\n",
+            );
+            let _ = pane.write_input(setup.as_bytes());
+        }
+
+        Ok(pane)
     }
 
     /// Write input bytes to the PTY (keyboard input from user).
@@ -135,6 +152,32 @@ impl Pane {
         Ok(())
     }
 
+    /// Scroll the terminal view up (into scrollback history).
+    pub fn scroll_up(&self, lines: usize) {
+        let mut parser = self.parser.lock().unwrap_or_else(|e| e.into_inner());
+        let current = parser.screen().scrollback();
+        parser.screen_mut().set_scrollback(current + lines);
+    }
+
+    /// Scroll the terminal view down (towards current output).
+    pub fn scroll_down(&self, lines: usize) {
+        let mut parser = self.parser.lock().unwrap_or_else(|e| e.into_inner());
+        let current = parser.screen().scrollback();
+        parser.screen_mut().set_scrollback(current.saturating_sub(lines));
+    }
+
+    /// Reset scroll to the bottom (live view).
+    pub fn scroll_reset(&self) {
+        let mut parser = self.parser.lock().unwrap_or_else(|e| e.into_inner());
+        parser.screen_mut().set_scrollback(0);
+    }
+
+    /// Check if the terminal is scrolled back.
+    pub fn is_scrolled_back(&self) -> bool {
+        let parser = self.parser.lock().unwrap_or_else(|e| e.into_inner());
+        parser.screen().scrollback() > 0
+    }
+
     /// Kill the PTY child process.
     pub fn kill(&mut self) {
         let _ = self.child.kill();
@@ -159,13 +202,19 @@ fn pty_reader_thread(
     loop {
         match reader.read(&mut buf) {
             Ok(0) => {
-                // EOF — PTY closed
                 let _ = event_tx.send(AppEvent::PtyEof(pane_id));
                 break;
             }
             Ok(n) => {
+                let data = &buf[..n];
+
+                // Detect OSC 7 (cwd notification) before passing to vt100
+                if let Some(path) = extract_osc7(data) {
+                    let _ = event_tx.send(AppEvent::CwdChanged(pane_id, path));
+                }
+
                 let mut parser = parser.lock().unwrap_or_else(|e| e.into_inner());
-                parser.process(&buf[..n]);
+                parser.process(data);
                 drop(parser);
                 let _ = event_tx.send(AppEvent::PtyOutput(pane_id));
             }
@@ -174,6 +223,58 @@ fn pty_reader_thread(
             }
         }
     }
+}
+
+/// Extract path from OSC 7 escape sequence: \x1b]7;file://HOST/PATH(\x07|\x1b\\)
+fn extract_osc7(data: &[u8]) -> Option<PathBuf> {
+    let s = std::str::from_utf8(data).ok()?;
+
+    // Look for OSC 7 pattern
+    let marker = "\x1b]7;";
+    let start = s.find(marker)?;
+    let rest = &s[start + marker.len()..];
+
+    // Find the terminator: BEL (\x07) or ST (\x1b\\)
+    let end = rest.find('\x07')
+        .or_else(|| rest.find("\x1b\\").map(|i| i));
+
+    let uri = &rest[..end?];
+
+    // Parse file:// URI → extract path
+    // Formats: file://hostname/path, file:///path, file:///c/Users/...
+    if let Some(path_str) = uri.strip_prefix("file://") {
+        // Skip hostname part: find the path starting with /
+        // file://hostname/path → skip "hostname", take "/path"
+        // file:///path → hostname is empty, take "/path"
+        let path = if path_str.starts_with('/') {
+            // No hostname (file:///path)
+            path_str
+        } else if let Some(slash_pos) = path_str.find('/') {
+            // Has hostname (file://host/path)
+            &path_str[slash_pos..]
+        } else {
+            return None;
+        };
+
+        // On Windows/MSYS2, convert /c/Users/... to C:\Users\...
+        #[cfg(windows)]
+        {
+            let path_bytes = path.as_bytes();
+            if path_bytes.len() >= 3
+                && path_bytes[0] == b'/'
+                && path_bytes[1].is_ascii_alphabetic()
+                && path_bytes[2] == b'/'
+            {
+                let drive = path_bytes[1].to_ascii_uppercase() as char;
+                let rest = &path[2..];
+                let win_path = format!("{}:{}", drive, rest.replace('/', "\\"));
+                return Some(PathBuf::from(win_path));
+            }
+        }
+        return Some(PathBuf::from(path));
+    }
+
+    None
 }
 
 /// Detect the appropriate shell to launch.

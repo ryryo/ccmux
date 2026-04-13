@@ -14,7 +14,7 @@ pub struct FileEntry {
 
 impl FileEntry {
     /// Build a file tree from a directory path.
-    pub fn from_dir(path: &Path, depth: usize, max_depth: usize) -> Option<Self> {
+    pub fn from_dir(path: &Path, depth: usize, _max_depth: usize) -> Option<Self> {
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -31,18 +31,13 @@ impl FileEntry {
             });
         }
 
-        let children = if depth < max_depth {
-            scan_directory(path, depth + 1, max_depth)
-        } else {
-            Vec::new()
-        };
-
+        // Don't recurse into subdirectories — children are loaded lazily on expand
         Some(Self {
             name,
             path: path.to_path_buf(),
             is_dir: true,
             is_expanded: false,
-            children,
+            children: Vec::new(),
             depth,
         })
     }
@@ -52,7 +47,7 @@ impl FileEntry {
 /// Maximum entries per directory to prevent DoS from huge directories.
 const MAX_ENTRIES_PER_DIR: usize = 500;
 
-fn scan_directory(path: &Path, depth: usize, max_depth: usize) -> Vec<FileEntry> {
+fn scan_directory_filtered(path: &Path, depth: usize, max_depth: usize, show_hidden: bool) -> Vec<FileEntry> {
     let entries = match fs::read_dir(path) {
         Ok(entries) => entries,
         Err(_) => return Vec::new(),
@@ -73,14 +68,21 @@ fn scan_directory(path: &Path, depth: usize, max_depth: usize) -> Vec<FileEntry>
             .to_string_lossy()
             .to_string();
 
-        // Skip hidden files/directories
-        if name.starts_with('.') {
+        // Always skip .git (too large and noisy)
+        if name == ".git" {
+            continue;
+        }
+
+        // Skip other hidden files/directories unless show_hidden is enabled
+        if !show_hidden && name.starts_with('.') {
             continue;
         }
 
         // Skip symlinks to prevent traversal outside the project
-        if entry_path.symlink_metadata().map_or(true, |m| m.is_symlink()) {
-            continue;
+        if let Ok(meta) = entry_path.symlink_metadata() {
+            if meta.is_symlink() {
+                continue;
+            }
         }
 
         if let Some(file_entry) = FileEntry::from_dir(&entry_path, depth, max_depth) {
@@ -110,6 +112,7 @@ pub struct FileTree {
     pub entries: Vec<FileEntry>,
     pub selected_index: usize,
     pub scroll_offset: usize,
+    pub show_hidden: bool,
     /// Flattened list of visible entries for rendering.
     flat_entries: Vec<FlatEntry>,
 }
@@ -127,16 +130,27 @@ pub struct FlatEntry {
 impl FileTree {
     /// Create a new file tree from a directory.
     pub fn new(root_path: PathBuf) -> Self {
-        let entries = scan_directory(&root_path, 0, 5);
+        // Default: show hidden files (except .git)
+        let entries = scan_directory_filtered(&root_path, 0, 1, true);
         let mut tree = Self {
             root_path,
             entries,
             selected_index: 0,
             scroll_offset: 0,
+            show_hidden: true,
             flat_entries: Vec::new(),
         };
         tree.rebuild_flat();
         tree
+    }
+
+    /// Toggle showing hidden files and rescan.
+    pub fn toggle_hidden(&mut self) {
+        self.show_hidden = !self.show_hidden;
+        self.entries = scan_directory_filtered(&self.root_path, 0, 1, self.show_hidden);
+        self.selected_index = 0;
+        self.scroll_offset = 0;
+        self.rebuild_flat();
     }
 
     /// Rebuild the flattened entry list from the tree structure.
@@ -208,24 +222,24 @@ impl FileTree {
 
     /// Toggle a directory's expanded state.
     fn toggle_dir(&mut self, path: &Path) {
+        let show_hidden = self.show_hidden;
         for entry in &mut self.entries {
-            if Self::toggle_dir_recursive(entry, path) {
+            if Self::toggle_dir_recursive(entry, path, show_hidden) {
                 return;
             }
         }
     }
 
-    fn toggle_dir_recursive(entry: &mut FileEntry, path: &Path) -> bool {
+    fn toggle_dir_recursive(entry: &mut FileEntry, path: &Path, show_hidden: bool) -> bool {
         if entry.path == path && entry.is_dir {
             entry.is_expanded = !entry.is_expanded;
-            // Load children if first expansion and children are empty
             if entry.is_expanded && entry.children.is_empty() {
-                entry.children = scan_directory(&entry.path, entry.depth + 1, 5);
+                entry.children = scan_directory_filtered(&entry.path, entry.depth + 1, entry.depth + 2, show_hidden);
             }
             return true;
         }
         for child in &mut entry.children {
-            if Self::toggle_dir_recursive(child, path) {
+            if Self::toggle_dir_recursive(child, path, show_hidden) {
                 return true;
             }
         }
@@ -263,8 +277,7 @@ mod tests {
 
     #[test]
     fn test_scan_directory_skips_hidden() {
-        // Use the current project directory as test target
-        let entries = scan_directory(Path::new("."), 0, 1);
+        let entries = scan_directory_filtered(Path::new("."), 0, 1, false);
         for entry in &entries {
             assert!(
                 !entry.name.starts_with('.'),
@@ -275,8 +288,27 @@ mod tests {
     }
 
     #[test]
+    fn test_scan_directory_skips_git() {
+        let entries = scan_directory_filtered(Path::new("."), 0, 1, true);
+        for entry in &entries {
+            assert!(
+                entry.name != ".git",
+                ".git should always be skipped"
+            );
+        }
+    }
+
+    #[test]
+    fn test_scan_directory_shows_dotfiles_when_enabled() {
+        let entries = scan_directory_filtered(Path::new("."), 0, 1, true);
+        let has_dotfile = entries.iter().any(|e| e.name.starts_with('.'));
+        // Project has .claude, .gitignore, etc.
+        assert!(has_dotfile, "Should show dotfiles when show_hidden=true");
+    }
+
+    #[test]
     fn test_scan_directory_dirs_before_files() {
-        let entries = scan_directory(Path::new("."), 0, 1);
+        let entries = scan_directory_filtered(Path::new("."), 0, 1, false);
         let mut seen_file = false;
         for entry in &entries {
             if !entry.is_dir {

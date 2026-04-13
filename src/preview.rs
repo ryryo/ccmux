@@ -2,16 +2,30 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
+use syntect::highlighting::ThemeSet;
+use syntect::parsing::SyntaxSet;
+use syntect::easy::HighlightLines;
+
 const MAX_PREVIEW_LINES: usize = 500;
 const BINARY_CHECK_BYTES: usize = 8192;
 const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+
+/// A styled text span for rendering.
+#[derive(Debug, Clone)]
+pub struct StyledSpan {
+    pub text: String,
+    pub fg: (u8, u8, u8),
+}
 
 /// File preview state.
 pub struct Preview {
     pub file_path: Option<PathBuf>,
     pub lines: Vec<String>,
+    pub highlighted_lines: Vec<Vec<StyledSpan>>,
     pub scroll_offset: usize,
     pub is_binary: bool,
+    syntax_set: SyntaxSet,
+    theme_set: ThemeSet,
 }
 
 impl Preview {
@@ -19,14 +33,16 @@ impl Preview {
         Self {
             file_path: None,
             lines: Vec::new(),
+            highlighted_lines: Vec::new(),
             scroll_offset: 0,
             is_binary: false,
+            syntax_set: SyntaxSet::load_defaults_newlines(),
+            theme_set: ThemeSet::load_defaults(),
         }
     }
 
     /// Load a file for preview.
     pub fn load(&mut self, path: &Path) {
-        // Don't reload the same file
         if self.file_path.as_deref() == Some(path) {
             return;
         }
@@ -34,9 +50,9 @@ impl Preview {
         self.file_path = Some(path.to_path_buf());
         self.scroll_offset = 0;
         self.lines.clear();
+        self.highlighted_lines.clear();
         self.is_binary = false;
 
-        // Check file size first to avoid OOM
         let metadata = match std::fs::metadata(path) {
             Ok(m) => m,
             Err(_) => {
@@ -59,13 +75,12 @@ impl Preview {
             return;
         }
 
-        // Check if file is binary (read only first N bytes)
         if is_binary_file(path) {
             self.is_binary = true;
             return;
         }
 
-        // Read text file line-by-line (bounded)
+        // Read text file
         match File::open(path) {
             Ok(file) => {
                 let reader = BufReader::new(file);
@@ -77,6 +92,52 @@ impl Preview {
             }
             Err(_) => {
                 self.lines = vec!["ファイルを読み込めませんでした".to_string()];
+                return;
+            }
+        }
+
+        // Apply syntax highlighting
+        self.highlight(path);
+    }
+
+    /// Apply syntax highlighting to loaded lines.
+    fn highlight(&mut self, path: &Path) {
+        let syntax = self
+            .syntax_set
+            .find_syntax_for_file(path)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text());
+
+        let theme = &self.theme_set.themes["base16-eighties.dark"];
+        let mut highlighter = HighlightLines::new(syntax, theme);
+
+        self.highlighted_lines.clear();
+
+        for line in &self.lines {
+            let line_with_newline = format!("{}\n", line);
+            match highlighter.highlight_line(&line_with_newline, &self.syntax_set) {
+                Ok(ranges) => {
+                    let spans: Vec<StyledSpan> = ranges
+                        .into_iter()
+                        .map(|(style, text)| {
+                            let fg = style.foreground;
+                            StyledSpan {
+                                text: text.trim_end_matches('\n').to_string(),
+                                fg: (fg.r, fg.g, fg.b),
+                            }
+                        })
+                        .filter(|s| !s.text.is_empty())
+                        .collect();
+                    self.highlighted_lines.push(spans);
+                }
+                Err(_) => {
+                    // Fallback: plain text
+                    self.highlighted_lines.push(vec![StyledSpan {
+                        text: line.clone(),
+                        fg: (0xe6, 0xed, 0xf3),
+                    }]);
+                }
             }
         }
     }
@@ -85,6 +146,7 @@ impl Preview {
     pub fn close(&mut self) {
         self.file_path = None;
         self.lines.clear();
+        self.highlighted_lines.clear();
         self.scroll_offset = 0;
         self.is_binary = false;
     }
@@ -147,6 +209,7 @@ mod tests {
         assert!(preview.is_active());
         assert!(!preview.is_binary);
         assert!(!preview.lines.is_empty());
+        assert!(!preview.highlighted_lines.is_empty());
     }
 
     #[test]
@@ -158,6 +221,7 @@ mod tests {
         preview.close();
         assert!(!preview.is_active());
         assert!(preview.lines.is_empty());
+        assert!(preview.highlighted_lines.is_empty());
     }
 
     #[test]
@@ -170,5 +234,15 @@ mod tests {
         assert_eq!(preview.scroll_offset, 5);
         preview.scroll_up(100);
         assert_eq!(preview.scroll_offset, 0);
+    }
+
+    #[test]
+    fn test_preview_highlight_rust() {
+        let mut preview = Preview::new();
+        preview.load(Path::new("src/main.rs"));
+        assert!(!preview.highlighted_lines.is_empty());
+        // Highlighted lines should have colored spans
+        let first = &preview.highlighted_lines[0];
+        assert!(!first.is_empty());
     }
 }
