@@ -74,3 +74,21 @@ jobs:
             artifacts/ccmux-macos-x64/ccmux-macos-x64
             artifacts/ccmux-macos-arm64/ccmux-macos-arm64
             artifacts/ccmux-linux-x64/ccmux-linux-x64
+
+  publish-npm:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish to npm
+        working-directory: npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

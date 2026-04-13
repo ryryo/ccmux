@@ -1,0 +1,36 @@
+{
+  "name": "ccmux",
+  "version": "0.1.0",
+  "description": "Claude Code Multiplexer — manage multiple Claude Code instances in TUI split panes",
+  "bin": {
+    "ccmux": "bin/cli.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "terminal",
+    "multiplexer",
+    "tui",
+    "pane",
+    "split",
+    "tmux"
+  ],
+  "author": "Shin-sibainu",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Shin-sibainu/ccmux"
+  },
+  "homepage": "https://shin-sibainu.github.io/ccmux/",
+  "os": [
+    "win32",
+    "darwin",
+    "linux"
+  ],
+  "engines": {
+    "node": ">=16"
+  }
+}

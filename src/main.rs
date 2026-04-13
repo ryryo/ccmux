@@ -18,6 +18,17 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 fn main() -> Result<()> {
+    // If a directory is passed as argument, cd into it first
+    if let Some(dir) = std::env::args().nth(1) {
+        let path = std::path::Path::new(&dir);
+        if path.is_dir() {
+            std::env::set_current_dir(path)?;
+        } else {
+            eprintln!("ccmux: not a directory: {}", dir);
+            std::process::exit(1);
+        }
+    }
+
     // Install panic hook to restore terminal state on crash
     let default_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
