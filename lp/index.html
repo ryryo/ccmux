@@ -208,6 +208,111 @@
         </div>
       </section>
 
+      <!-- COMPARE -->
+      <section class="compare" id="compare">
+        <header class="section-head" data-reveal>
+          <span class="eyebrow">Compare</span>
+          <h2 class="h2">他のターミナルツールとの違い。</h2>
+          <p class="section-lede">
+            tmux や Zellij は強力な汎用マルチプレクサ、Warp はモダンな
+            GUI ターミナル。どれも優れた選択肢です。ccmux は
+            <strong>Claude Code を並列運用する人向けに作られた専用ツール</strong>
+            で、汎用性より特化した統合を選んでいます。
+          </p>
+        </header>
+
+        <div class="table-scroll" data-reveal style="--reveal-delay: 80ms">
+          <table class="compare-table">
+            <thead>
+              <tr>
+                <th scope="col" class="feature-col">機能</th>
+                <th scope="col" class="is-primary">
+                  <span class="col-head">
+                    <span class="logo-mark" aria-hidden="true">◈</span>
+                    ccmux
+                  </span>
+                </th>
+                <th scope="col">tmux</th>
+                <th scope="col">Zellij</th>
+                <th scope="col">Warp</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">ペイン分割（同一ウィンドウ内）</th>
+                <td class="is-primary"><span class="cell-yes">✓</span></td>
+                <td><span class="cell-yes">✓</span></td>
+                <td><span class="cell-yes">✓</span></td>
+                <td><span class="cell-no">—</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Claude Code 自動検出</th>
+                <td class="is-primary"><span class="cell-yes">✓</span></td>
+                <td><span class="cell-no">—</span></td>
+                <td><span class="cell-no">—</span></td>
+                <td><span class="cell-no">—</span></td>
+              </tr>
+              <tr>
+                <th scope="row">トークン／コンテキスト表示</th>
+                <td class="is-primary"><span class="cell-yes">✓</span></td>
+                <td><span class="cell-no">—</span></td>
+                <td><span class="cell-no">—</span></td>
+                <td><span class="cell-no">—</span></td>
+              </tr>
+              <tr>
+                <th scope="row">サブエージェント追跡</th>
+                <td class="is-primary"><span class="cell-yes">✓</span></td>
+                <td><span class="cell-no">—</span></td>
+                <td><span class="cell-no">—</span></td>
+                <td><span class="cell-no">—</span></td>
+              </tr>
+              <tr>
+                <th scope="row">TodoList 進捗バー</th>
+                <td class="is-primary"><span class="cell-yes">✓</span></td>
+                <td><span class="cell-no">—</span></td>
+                <td><span class="cell-no">—</span></td>
+                <td><span class="cell-no">—</span></td>
+              </tr>
+              <tr>
+                <th scope="row">設定ファイル不要</th>
+                <td class="is-primary"><span class="cell-yes">✓</span></td>
+                <td><span class="cell-no">—</span></td>
+                <td><span class="cell-yes">✓</span></td>
+                <td><span class="cell-yes">✓</span></td>
+              </tr>
+              <tr>
+                <th scope="row">単一バイナリ</th>
+                <td class="is-primary"><span class="cell-yes">✓</span></td>
+                <td><span class="cell-yes">✓</span></td>
+                <td><span class="cell-yes">✓</span></td>
+                <td><span class="cell-no">—</span></td>
+              </tr>
+              <tr>
+                <th scope="row">
+                  Windows ネイティブ<sup class="fn">*</sup>
+                </th>
+                <td class="is-primary"><span class="cell-yes">✓</span></td>
+                <td><span class="cell-partial">△</span></td>
+                <td><span class="cell-yes">✓</span></td>
+                <td><span class="cell-yes">✓</span></td>
+              </tr>
+              <tr>
+                <th scope="row">ファイルツリー＋プレビュー</th>
+                <td class="is-primary"><span class="cell-yes">✓</span></td>
+                <td><span class="cell-no">—</span></td>
+                <td><span class="cell-no">—</span></td>
+                <td><span class="cell-no">—</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="compare-footnote" data-reveal style="--reveal-delay: 140ms">
+          <sup class="fn">*</sup> tmux は WSL / Cygwin 経由で動作。ccmux は
+          ConPTY を使った Windows ネイティブ。
+        </p>
+      </section>
+
       <!-- WHY -->
       <section class="why">
         <div class="why-inner" data-reveal>

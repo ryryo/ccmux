@@ -667,6 +667,131 @@ kbd {
   border-radius: var(--r-pill);
 }
 
+/* ---------- Compare section ---------- */
+
+.compare {
+  padding-top: clamp(56px, 8vw, 120px);
+  padding-bottom: clamp(56px, 8vw, 120px);
+}
+
+.compare .section-lede strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.table-scroll {
+  margin-top: var(--sp-10);
+  overflow-x: auto;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.compare-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 14.5px;
+}
+
+.compare-table th,
+.compare-table td {
+  padding: 14px 18px;
+  text-align: center;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.compare-table thead th {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13.5px;
+  letter-spacing: -0.005em;
+  color: var(--ink-muted);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--line-strong);
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+.compare-table thead .is-primary {
+  color: var(--ink);
+  background: oklab(0.68 0.18 0.11 / 0.08);
+}
+
+.compare-table .col-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 14.5px;
+  letter-spacing: -0.01em;
+}
+
+.compare-table tbody th {
+  text-align: left;
+  font-family: var(--font-display);
+  font-weight: 500;
+  color: var(--ink);
+  font-size: 14px;
+  letter-spacing: -0.005em;
+  padding-left: 20px;
+  max-width: 0; /* lets text wrap cleanly */
+}
+
+.compare-table tbody tr:last-child th,
+.compare-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.compare-table tbody tr:hover {
+  background: oklab(0.18 0 0 / 0.015);
+}
+
+.compare-table td.is-primary {
+  background: oklab(0.68 0.18 0.11 / 0.045);
+}
+
+.compare-table .feature-col {
+  text-align: left;
+  padding-left: 20px;
+}
+
+.cell-yes {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.cell-no {
+  color: var(--ink-faint);
+  font-size: 15px;
+  opacity: 0.55;
+}
+
+.cell-partial {
+  color: var(--ink-muted);
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.fn {
+  font-size: 10.5px;
+  color: var(--accent);
+  margin-left: 2px;
+}
+
+.compare-footnote {
+  margin-top: var(--sp-5);
+  font-size: 12.5px;
+  color: var(--ink-faint);
+}
+
+.compare-footnote .fn {
+  margin-right: 2px;
+}
+
 /* ---------- Why section ---------- */
 
 .why {
