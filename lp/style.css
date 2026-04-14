@@ -235,6 +235,7 @@ main {
 .nav,
 .hero,
 .features,
+.compare,
 .why,
 .install,
 .cta,
@@ -1085,6 +1086,23 @@ kbd {
   .footer-links {
     flex-wrap: wrap;
     gap: var(--sp-4);
+  }
+
+  /* Compare table: tighten cell padding and reduce min-width so the
+     horizontal scroll stays gentle on narrow screens. */
+  .compare-table {
+    min-width: 540px;
+    font-size: 13.5px;
+  }
+
+  .compare-table th,
+  .compare-table td {
+    padding: 11px 12px;
+  }
+
+  .compare-table tbody th {
+    padding-left: 14px;
+    font-size: 13px;
   }
 }
 
