@@ -6,21 +6,21 @@ use ratatui::Frame;
 
 use crate::app::{App, DragTarget, FocusTarget};
 
-// ─── Theme (Claude-inspired) ──────────────────────────────
-const BG: Color = Color::Rgb(0x0d, 0x11, 0x17);
-const PANEL_BG: Color = Color::Rgb(0x13, 0x17, 0x1f);
-const BORDER: Color = Color::Rgb(0x2d, 0x33, 0x3b);
-const FOCUS_BORDER: Color = Color::Rgb(0x58, 0xa6, 0xff);
-const TEXT: Color = Color::Rgb(0xe6, 0xed, 0xf3);
-const TEXT_DIM: Color = Color::Rgb(0x6e, 0x76, 0x81);
-const ACCENT_GREEN: Color = Color::Rgb(0x3f, 0xb9, 0x50);
-const ACCENT_BLUE: Color = Color::Rgb(0x58, 0xa6, 0xff);
-const ACCENT_CLAUDE: Color = Color::Rgb(0xd9, 0x77, 0x57);
-const HEADER_BG: Color = Color::Rgb(0x16, 0x1b, 0x22);
-const ACTIVE_TAB_BG: Color = Color::Rgb(0x0d, 0x11, 0x17);
-const ACTIVE_BG: Color = Color::Rgb(0x1c, 0x23, 0x33);
-const LINE_NUM_COLOR: Color = Color::Rgb(0x3d, 0x44, 0x4d);
-const SCROLL_BG: Color = Color::Rgb(0x2a, 0x1f, 0x14);
+// ─── Theme (Light) ────────────────────────────────────────
+const BG: Color = Color::Rgb(0xf6, 0xf8, 0xfa);
+const PANEL_BG: Color = Color::Rgb(0xff, 0xff, 0xff);
+const BORDER: Color = Color::Rgb(0xd0, 0xd7, 0xde);
+const FOCUS_BORDER: Color = Color::Rgb(0x01, 0x69, 0xda);
+const TEXT: Color = Color::Rgb(0x1f, 0x23, 0x28);
+const TEXT_DIM: Color = Color::Rgb(0x65, 0x6d, 0x76);
+const ACCENT_GREEN: Color = Color::Rgb(0x1a, 0x7f, 0x37);
+const ACCENT_BLUE: Color = Color::Rgb(0x01, 0x69, 0xda);
+const ACCENT_CLAUDE: Color = Color::Rgb(0xc9, 0x5f, 0x2e);
+const HEADER_BG: Color = Color::Rgb(0xef, 0xf2, 0xf5);
+const ACTIVE_TAB_BG: Color = Color::Rgb(0xf6, 0xf8, 0xfa);
+const ACTIVE_BG: Color = Color::Rgb(0xe8, 0xf0, 0xfe);
+const LINE_NUM_COLOR: Color = Color::Rgb(0xaf, 0xb8, 0xc1);
+const SCROLL_BG: Color = Color::Rgb(0xf5, 0xe6, 0xd8);
 
 const MIN_TERMINAL_WIDTH: u16 = 40;
 const MIN_TERMINAL_HEIGHT: u16 = 10;
@@ -542,8 +542,8 @@ fn render_terminal_content(
                 });
                 let final_style = if has_selection {
                     Style::default()
-                        .fg(Color::Rgb(0x0d, 0x11, 0x17))
-                        .bg(Color::Rgb(0x58, 0xa6, 0xff))
+                        .fg(Color::Rgb(0xff, 0xff, 0xff))
+                        .bg(FOCUS_BORDER)
                 } else {
                     style
                 };
@@ -792,8 +792,8 @@ fn render_preview(app: &App, frame: &mut Frame, area: Rect) {
                         if let Some(cell) = buf.cell_mut((x, y)) {
                             cell.set_style(
                                 Style::default()
-                                    .fg(Color::Rgb(0x0d, 0x11, 0x17))
-                                    .bg(Color::Rgb(0x58, 0xa6, 0xff)),
+                                    .fg(Color::Rgb(0xff, 0xff, 0xff))
+                                    .bg(FOCUS_BORDER),
                             );
                         }
                     }
