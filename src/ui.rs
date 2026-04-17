@@ -34,8 +34,8 @@ fn file_icon(name: &str) -> (&'static str, Color) {
         "toml" => ("\u{2699}\u{fe0f} ", Color::Rgb(0x9e, 0x9e, 0x9e)),  // ⚙️ gray
         "lock" => ("\u{1f512} ", Color::Rgb(0x9e, 0x9e, 0x9e)),  // 🔒
         "md" => ("\u{1f4c4} ", Color::Rgb(0x58, 0xa6, 0xff)),   // 📄 blue
-        "json" => ("{ ", Color::Rgb(0xf1, 0xe0, 0x5a)),         // { yellow
-        "yaml" | "yml" => ("~ ", Color::Rgb(0xf1, 0xe0, 0x5a)), // ~ yellow
+        "json" => ("{ ", Color::Rgb(0x99, 0x6b, 0x00)),         // { dark amber
+        "yaml" | "yml" => ("~ ", Color::Rgb(0x99, 0x6b, 0x00)), // ~ dark amber
         "js" => ("\u{26a1} ", Color::Rgb(0xf1, 0xe0, 0x5a)),    // ⚡ yellow
         "ts" | "tsx" => ("\u{26a1} ", Color::Rgb(0x31, 0x78, 0xc6)), // ⚡ blue
         "jsx" => ("\u{26a1} ", Color::Rgb(0x61, 0xda, 0xfb)),   // ⚡ cyan
