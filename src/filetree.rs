@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 /// A node in the file tree.
 #[derive(Debug, Clone)]
@@ -106,6 +107,9 @@ fn scan_directory_filtered(path: &Path, depth: usize, max_depth: usize, show_hid
 }
 
 /// File tree state for the sidebar.
+/// Interval between automatic rescans of visible directories.
+const AUTO_REFRESH_INTERVAL_SECS: u64 = 2;
+
 #[allow(dead_code)]
 pub struct FileTree {
     pub root_path: PathBuf,
@@ -115,6 +119,8 @@ pub struct FileTree {
     pub show_hidden: bool,
     /// Flattened list of visible entries for rendering.
     flat_entries: Vec<FlatEntry>,
+    /// Timestamp of the last automatic rescan.
+    last_refresh: Instant,
 }
 
 /// A flattened entry for rendering.
@@ -139,6 +145,7 @@ impl FileTree {
             scroll_offset: 0,
             show_hidden: true,
             flat_entries: Vec::new(),
+            last_refresh: Instant::now(),
         };
         tree.rebuild_flat();
         tree
@@ -244,6 +251,70 @@ impl FileTree {
             }
         }
         false
+    }
+
+    /// Check if it's time to auto-refresh and do so if needed.
+    /// Returns true if the tree was updated.
+    pub fn auto_refresh_if_needed(&mut self) -> bool {
+        if self.last_refresh.elapsed().as_secs() < AUTO_REFRESH_INTERVAL_SECS {
+            return false;
+        }
+        self.last_refresh = Instant::now();
+
+        // Remember the selected path so we can restore selection after rescan.
+        let selected_path = self.flat_entries
+            .get(self.selected_index)
+            .map(|e| e.path.clone());
+
+        // Rescan root level
+        let new_root = scan_directory_filtered(&self.root_path, 0, 1, self.show_hidden);
+        // Merge: preserve expanded state and children of existing dirs.
+        let old_entries = std::mem::take(&mut self.entries);
+        self.entries = Self::merge_entries(old_entries, new_root, self.show_hidden);
+        self.rebuild_flat();
+
+        // Restore selection
+        if let Some(ref path) = selected_path {
+            if let Some(idx) = self.flat_entries.iter().position(|e| &e.path == path) {
+                self.selected_index = idx;
+            }
+        }
+        // Clamp selection
+        if self.selected_index >= self.flat_entries.len() {
+            self.selected_index = self.flat_entries.len().saturating_sub(1);
+        }
+
+        true
+    }
+
+    /// Merge new scan results with existing entries, preserving expanded state.
+    fn merge_entries(mut old: Vec<FileEntry>, new: Vec<FileEntry>, show_hidden: bool) -> Vec<FileEntry> {
+        new.into_iter()
+            .map(|mut new_entry| {
+                if new_entry.is_dir {
+                    // Find and remove matching old entry to take ownership
+                    if let Some(idx) = old.iter().position(|o| o.path == new_entry.path) {
+                        let old_entry = old.swap_remove(idx);
+                        if old_entry.is_expanded {
+                            // Preserve expanded state, rescan children
+                            new_entry.is_expanded = true;
+                            let new_children = scan_directory_filtered(
+                                &new_entry.path,
+                                new_entry.depth + 1,
+                                new_entry.depth + 2,
+                                show_hidden,
+                            );
+                            new_entry.children = Self::merge_entries(
+                                old_entry.children,
+                                new_children,
+                                show_hidden,
+                            );
+                        }
+                    }
+                }
+                new_entry
+            })
+            .collect()
     }
 
     /// Adjust scroll offset to keep selected item visible.

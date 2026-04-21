@@ -102,6 +102,13 @@ fn run_event_loop(
         // Drain any PTY output events
         app.drain_pty_events();
 
+        // Auto-refresh file tree if sidebar is visible
+        if app.ws().file_tree_visible {
+            if app.ws_mut().file_tree.auto_refresh_if_needed() {
+                app.dirty = true;
+            }
+        }
+
         // After paste, wait a few frames for PTY echo to settle
         if app.paste_cooldown > 0 {
             app.paste_cooldown -= 1;
