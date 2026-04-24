@@ -48,6 +48,13 @@ fn main() -> Result<()> {
         default_hook(info);
     }));
 
+    // Query terminal for graphics protocol support BEFORE raw mode.
+    // Falls back to halfblocks if detection fails.
+    let image_picker = Some(
+        ratatui_image::picker::Picker::from_query_stdio()
+            .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks()),
+    );
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -63,6 +70,7 @@ fn main() -> Result<()> {
 
     // Create app
     let mut app = app::App::new(size.height, size.width)?;
+    app.image_picker = image_picker;
 
     // Main event loop
     let result = run_event_loop(&mut terminal, &mut app);
@@ -93,6 +101,13 @@ fn run_event_loop(
     loop {
         // Drain any PTY output events
         app.drain_pty_events();
+
+        // Auto-refresh file tree if sidebar is visible
+        if app.ws().file_tree_visible {
+            if app.ws_mut().file_tree.auto_refresh_if_needed() {
+                app.dirty = true;
+            }
+        }
 
         // After paste, wait a few frames for PTY echo to settle
         if app.paste_cooldown > 0 {
@@ -183,7 +198,9 @@ fn run_event_loop(
 }
 
 /// Flush accumulated key buffer to PTY. If multiple characters were collected
-/// (indicating a paste), wrap in bracketed paste sequences.
+/// (indicating a paste), wrap in bracketed paste sequences only when the PTY
+/// application has enabled the mode. Unconditional wrapping causes shells that
+/// haven't opted in to display the escape sequences as literal text (issue #2).
 fn flush_paste_buffer(app: &mut app::App, buffer: &mut Vec<u8>) -> Result<()> {
     if buffer.is_empty() {
         return Ok(());
@@ -193,12 +210,15 @@ fn flush_paste_buffer(app: &mut app::App, buffer: &mut Vec<u8>) -> Result<()> {
     if let Some(pane) = app.ws_mut().panes.get_mut(&focused_id) {
         pane.scroll_reset();
         if buffer.len() > 6 {
-            // Likely a paste — wrap in bracketed paste
-            let mut data = Vec::with_capacity(buffer.len() + 12);
-            data.extend_from_slice(b"\x1b[200~");
-            data.extend_from_slice(buffer);
-            data.extend_from_slice(b"\x1b[201~");
-            pane.write_input(&data)?;
+            if pane.is_bracketed_paste_enabled() {
+                let mut data = Vec::with_capacity(buffer.len() + 12);
+                data.extend_from_slice(b"\x1b[200~");
+                data.extend_from_slice(buffer);
+                data.extend_from_slice(b"\x1b[201~");
+                pane.write_input(&data)?;
+            } else {
+                pane.write_input(buffer)?;
+            }
             app.paste_cooldown = 5;
         } else {
             // Normal typing — send directly
