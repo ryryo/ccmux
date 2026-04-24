@@ -12,3 +12,6 @@ image copy 2.png
 # Platform-specific binaries fetched by npm postinstall
 /npm/bin/ccmux
 /npm/bin/ccmux.exe
+
+# Local dev build binary
+/ccmux-light
