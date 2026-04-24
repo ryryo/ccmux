@@ -42,7 +42,8 @@
       "mcp__playwright__browser_close",
       "Bash(npm view *)",
       "Bash(gh release *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git merge *)"
     ]
   }
 }
