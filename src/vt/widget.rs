@@ -48,14 +48,17 @@ impl Widget for PtyPaneWidget<'_> {
                 }
                 let x = area.x + sx;
                 let y = area.y + screen_row as u16;
-                let style = to_ratatui_style(cell.fg, cell.bg, cell.attrs);
-                // NOTE: OSC 8 hyperlinks are *not* visually decorated by
-                // default. Claude Code (v2.1.x) wraps almost every span — code
-                // blocks, version banners, even cwd — in hyperlinks, and the
-                // previous "blue + underline" decoration drowned the screen in
-                // styling. Ctrl+click still works because the id is preserved
-                // on the cell. A future config flag can re-enable the visual
-                // for users who want it.
+                let mut style = to_ratatui_style(cell.fg, cell.bg, cell.attrs);
+                // OSC 8: visually mark cells in a hyperlink span. Skip blank
+                // cells — Claude Code (and others) include trailing spaces
+                // inside link spans, and underlining those spaces draws long
+                // black bars across the screen for empty-looking regions.
+                let is_blank = cell.ch == ' ' || cell.ch == '\0';
+                if cell.attrs.hyperlink != 0 && !is_blank {
+                    style = style
+                        .fg(RColor::Rgb(0x4a, 0x9e, 0xff))
+                        .add_modifier(Modifier::UNDERLINED);
+                }
                 let has_selection = self
                     .selection
                     .as_ref()
@@ -149,14 +152,15 @@ mod tests {
     }
 
     #[test]
-    fn render_does_not_decorate_osc8_hyperlinks_by_default() {
+    fn render_paints_osc8_hyperlink_only_on_non_blank_cells() {
         use ratatui::buffer::Buffer as RatBuffer;
         use ratatui::layout::Rect;
         use ratatui::widgets::Widget;
 
         let mut term = crate::vt::parser::Terminal::new(2, 20, 0);
-        // OSC 8 open + "hi" + OSC 8 close.
-        term.process(b"\x1b]8;;https://example.com\x1b\\hi\x1b]8;;\x1b\\");
+        // Hyperlink span includes trailing spaces — Claude Code does this,
+        // and it caused long horizontal underlines on empty-looking regions.
+        term.process(b"\x1b]8;;https://example.com\x1b\\hi   \x1b]8;;\x1b\\");
 
         let area = Rect::new(0, 0, 20, 2);
         let mut buf = RatBuffer::empty(area);
@@ -168,20 +172,31 @@ mod tests {
         };
         widget.render(area, &mut buf);
 
-        // Regression guard for the "Claude Code wraps everything in OSC 8"
-        // case: link text must NOT be underlined or recoloured by the
-        // widget. Hover/click resolution still works via cell.attrs.hyperlink
-        // even though we don't paint it.
+        // 'h' (0,0) and 'i' (1,0): visible link text → blue + underlined.
         for x in 0..2 {
             let cell = &buf[(x, 0)];
-            assert!(
-                !cell.style().add_modifier.contains(Modifier::UNDERLINED),
-                "cell ({x},0) must not be underlined just because it's a hyperlink"
+            assert_eq!(
+                cell.style().fg,
+                Some(RColor::Rgb(0x4a, 0x9e, 0xff)),
+                "cell ({x},0) fg should be hyperlink blue"
             );
+            assert!(
+                cell.style().add_modifier.contains(Modifier::UNDERLINED),
+                "cell ({x},0) should be underlined"
+            );
+        }
+        // Cells (2..5, 0): trailing spaces inside the link span — must NOT
+        // be styled as hyperlinks (regression test for the long-underline bug).
+        for x in 2..5 {
+            let cell = &buf[(x, 0)];
             assert_ne!(
                 cell.style().fg,
                 Some(RColor::Rgb(0x4a, 0x9e, 0xff)),
-                "cell ({x},0) must keep its original fg colour"
+                "cell ({x},0) is a blank inside link span and must not be coloured"
+            );
+            assert!(
+                !cell.style().add_modifier.contains(Modifier::UNDERLINED),
+                "cell ({x},0) is a blank inside link span and must not be underlined"
             );
         }
     }
