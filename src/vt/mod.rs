@@ -4,5 +4,6 @@ pub mod grid;
 pub mod line;
 pub mod osc;
 pub mod parser;
+pub mod reflow;
 pub mod scrollback;
 pub mod width;

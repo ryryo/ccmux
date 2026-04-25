@@ -41,6 +41,50 @@ impl Terminal {
     pub fn drain_events(&mut self) -> Vec<TerminalEvent> {
         std::mem::take(&mut self.pending_events)
     }
+
+    /// Resize the terminal to (rows, cols). Logical lines are preserved as-is —
+    /// reflow runs at draw time. We only adjust visible row count, clamp the
+    /// cursor, and clamp the scroll region.
+    pub fn resize(&mut self, rows: u16, cols: u16) {
+        let rows = rows.max(1);
+        let cols = cols.max(1);
+        let cursor_row = self.grid.cursor.row;
+        let on_alt = self.grid.use_alternate;
+
+        // Shrink: if the cursor would fall off the bottom, scroll lines off the top
+        // (saving to scrollback only for the primary buffer) so cursor content is
+        // preserved. Otherwise truncate trailing blank rows. Grow: append blanks.
+        if cursor_row >= rows {
+            let drop = cursor_row + 1 - rows;
+            self.grid.primary.scroll_lines_off_top(drop, !on_alt);
+            self.grid.alternate.scroll_lines_off_top(drop, false);
+            self.grid.cursor.row = rows - 1;
+        }
+        self.grid.rows = rows;
+        self.grid.cols = cols;
+        self.grid.primary.resize_visible(rows, cols);
+        self.grid.alternate.resize_visible(rows, cols);
+
+        if self.grid.cursor.row >= rows {
+            self.grid.cursor.row = rows - 1;
+        }
+        if self.grid.cursor.col >= cols {
+            self.grid.cursor.col = cols - 1;
+        }
+
+        let max_top = rows.saturating_sub(2);
+        let max_bottom = rows - 1;
+        if self.grid.scroll_top > max_top {
+            self.grid.scroll_top = max_top;
+        }
+        if self.grid.scroll_bottom > max_bottom {
+            self.grid.scroll_bottom = max_bottom;
+        }
+        if self.grid.scroll_top >= self.grid.scroll_bottom {
+            self.grid.scroll_top = 0;
+            self.grid.scroll_bottom = max_bottom;
+        }
+    }
 }
 
 struct Performer<'a> {
@@ -405,6 +449,75 @@ mod tests {
         t.process(b"\x1b[3;1H");
         t.process(b"\x1bM");
         assert_eq!(t.grid.cursor.row, 1);
+    }
+
+    #[test]
+    fn resize_grows_visible_rows() {
+        let mut t = Terminal::new(3, 5, 100);
+        t.resize(5, 5);
+        assert_eq!(t.grid.rows, 5);
+        assert_eq!(t.grid.primary.visible.len(), 5);
+        assert_eq!(t.grid.alternate.visible.len(), 5);
+        assert!(t.grid.scroll_bottom <= 4);
+    }
+
+    #[test]
+    fn resize_shrinks_visible_rows_and_clamps_cursor() {
+        let mut t = Terminal::new(5, 5, 100);
+        t.process(b"\x1b[5;5H");
+        assert_eq!(t.grid.cursor.row, 4);
+        t.resize(3, 5);
+        assert_eq!(t.grid.rows, 3);
+        assert_eq!(t.grid.primary.visible.len(), 3);
+        assert!(t.grid.cursor.row < 3);
+        assert!(t.grid.cursor.col < 5);
+    }
+
+    #[test]
+    fn resize_cols_only_preserves_scrollback() {
+        let mut t = Terminal::new(3, 10, 100);
+        t.process(b"line1\r\n");
+        t.process(b"line2\r\n");
+        t.process(b"line3\r\n");
+        t.process(b"line4\r\n");
+        let sb_before = t.grid.primary.scrollback.len();
+        t.resize(3, 6);
+        assert_eq!(t.grid.primary.scrollback.len(), sb_before);
+        assert_eq!(t.grid.cols, 6);
+    }
+
+    #[test]
+    fn resize_shrink_pushes_overflow_to_scrollback() {
+        let mut t = Terminal::new(5, 10, 100);
+        t.process(b"a\r\nb\r\nc\r\nd\r\ne");
+        let sb_before = t.grid.primary.scrollback.len();
+        t.resize(3, 10);
+        assert_eq!(t.grid.primary.visible.len(), 3);
+        // 'e' was on row 4; after shrink to 3 rows it should be on row 2 (preserved).
+        assert_eq!(t.grid.primary.visible[2].cells[0].ch, 'e');
+        // Top rows (a, b) were pushed to scrollback.
+        assert_eq!(t.grid.primary.scrollback.len(), sb_before + 2);
+    }
+
+    #[test]
+    fn resize_shrink_alt_screen_does_not_save_to_scrollback() {
+        let mut t = Terminal::new(5, 10, 100);
+        t.process(b"\x1b[?1049h"); // enter alt screen
+        t.process(b"a\r\nb\r\nc\r\nd\r\ne");
+        let sb_before = t.grid.alternate.scrollback.len();
+        t.resize(3, 10);
+        assert_eq!(t.grid.alternate.scrollback.len(), sb_before);
+    }
+
+    #[test]
+    fn resize_clamps_scroll_region() {
+        let mut t = Terminal::new(10, 10, 100);
+        t.process(b"\x1b[3;9r"); // top=2, bottom=8
+        assert_eq!(t.grid.scroll_top, 2);
+        assert_eq!(t.grid.scroll_bottom, 8);
+        t.resize(5, 10);
+        assert!(t.grid.scroll_bottom <= 4);
+        assert!(t.grid.scroll_top < t.grid.scroll_bottom);
     }
 
     #[test]

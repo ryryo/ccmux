@@ -382,10 +382,10 @@ Gate H: クリーンアップ・ドキュメント（Gate G 完了後）
 
 > soft wrap + 論理行/表示行モデルを実装、リサイズ時の整合性を保つ
 
-- [ ] **C1**: [TDD] Reflow: 論理行 → 表示行への射影
-  > **Review C1**: _未記入_
-- [ ] **C2**: [TDD] Terminal::resize: visible 行数調整 + scroll region クランプ
-  > **Review C2**: _未記入_
+- [x] **C1**: [TDD] Reflow: 論理行 → 表示行への射影
+  > **Review C1**: ✅ PASSED — Quality/Conventions/Correctness 3並列レビュー全 PASS。CJK 境界保護 (cw>0 ガード)、scrollback→visible の line_index 通し番号、空行 1 VisualRow、start_col 累積視覚幅などの不変条件を確認。Conv: 既存 vt モジュールの flat 構成・テスト inline 配置に整合。
+- [x] **C2**: [TDD] Terminal::resize: visible 行数調整 + scroll region クランプ
+  > **Review C2**: ✅ PASSED (FIX 1回) — Correctness reviewer (信頼度 85) が Buffer::resize_visible が末尾切詰めで cursor 行コンテンツを失う問題を指摘。修正: cursor.row >= 新 rows のとき scroll_lines_off_top で先頭側を scrollback (alt screen は破棄) に逃がしてから resize_visible。テスト 2 件追加 (resize_shrink_pushes_overflow_to_scrollback / resize_shrink_alt_screen_does_not_save_to_scrollback)。rows=1 退化 scroll region の指摘 (信頼度 80) は consumer 側 early-return で安全のため deferred。
 
 **Gate C 通過条件**: 全 Review 結果記入欄が埋まり、総合判定が PASS であること
 
