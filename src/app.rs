@@ -19,6 +19,11 @@ pub enum AppEvent {
     PtyEof(usize),
     /// Shell changed working directory (pane_id, new path).
     CwdChanged(usize, PathBuf),
+    /// OSC 52: PTY application asked to put `text` on the system clipboard.
+    ClipboardWrite(String),
+    /// OSC 52: PTY application asked to read the system clipboard.
+    /// pane_id is needed so we can write the response back to the right PTY.
+    ClipboardReadRequested(usize),
 }
 
 /// Split direction for layout.
@@ -303,8 +308,9 @@ impl Workspace {
         rows: u16,
         cols: u16,
         event_tx: Sender<AppEvent>,
+        scrollback_max: usize,
     ) -> Result<Self> {
-        let pane = Pane::new(pane_id, rows, cols, event_tx)?;
+        let pane = Pane::new(pane_id, rows, cols, event_tx, scrollback_max)?;
         let mut panes = HashMap::new();
         panes.insert(pane_id, pane);
 
@@ -394,10 +400,12 @@ pub struct App {
     clipboard: Option<arboard::Clipboard>,
     // Image preview protocol picker
     pub image_picker: Option<ratatui_image::picker::Picker>,
+    // User configuration (from ~/.config/ccmux/config.toml)
+    pub config: crate::config::Config,
 }
 
 impl App {
-    pub fn new(rows: u16, cols: u16) -> Result<Self> {
+    pub fn new(rows: u16, cols: u16, config: crate::config::Config) -> Result<Self> {
         let (event_tx, event_rx) = mpsc::channel();
 
         let pane_rows = rows.saturating_sub(5); // title + tab bar + status + borders
@@ -406,7 +414,7 @@ impl App {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let name = dir_name(&cwd);
 
-        let ws = Workspace::new(name, cwd, 1, pane_rows, pane_cols, event_tx.clone())?;
+        let ws = Workspace::new(name, cwd, 1, pane_rows, pane_cols, event_tx.clone(), config.scrollback.max_lines)?;
 
         Ok(Self {
             workspaces: vec![ws],
@@ -440,6 +448,7 @@ impl App {
             claude_monitor: crate::claude_monitor::ClaudeMonitor::new(),
             clipboard: None,
             image_picker: None,
+            config,
         })
     }
 
@@ -905,7 +914,7 @@ impl App {
         let pane_id = self.next_pane_id;
         self.next_pane_id = self.next_pane_id.wrapping_add(1);
 
-        let ws = Workspace::new(name, cwd, pane_id, 10, 40, self.event_tx.clone())?;
+        let ws = Workspace::new(name, cwd, pane_id, 10, 40, self.event_tx.clone(), self.config.scrollback.max_lines)?;
         self.workspaces.push(ws);
         self.active_tab = self.workspaces.len() - 1;
         Ok(())
@@ -995,7 +1004,7 @@ impl App {
         let parent_cwd = self.ws().panes.get(&self.ws().focused_pane_id)
             .map(|p| p.cwd.clone());
 
-        let pane = Pane::new_with_cwd(new_id, 10, 40, self.event_tx.clone(), parent_cwd)?;
+        let pane = Pane::new_with_cwd(new_id, 10, 40, self.event_tx.clone(), parent_cwd, self.config.scrollback.max_lines)?;
         let ws = self.ws_mut();
         ws.panes.insert(new_id, pane);
         ws.layout.split_pane(ws.focused_pane_id, new_id, direction);
@@ -1229,11 +1238,10 @@ impl App {
             mouse.kind,
             MouseEventKind::Down(_) | MouseEventKind::Up(_) | MouseEventKind::Drag(_)
                 | MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-        ) {
-            if self.try_forward_mouse_to_pty(&mouse) {
+        )
+            && self.try_forward_mouse_to_pty(&mouse) {
                 return;
             }
-        }
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
@@ -1368,6 +1376,30 @@ impl App {
                             self.scroll_pane_to_click(pane_id, row, &inner);
                             self.dragging = Some(DragTarget::Scrollbar(pane_id, inner));
                             return;
+                        }
+
+                        // F3: Ctrl+click on an OSC 8 hyperlink → open in OS handler.
+                        if mouse.modifiers.contains(KeyModifiers::CONTROL) {
+                            let inner = Rect::new(
+                                rect.x + 1, rect.y + 1,
+                                rect.width.saturating_sub(2),
+                                rect.height.saturating_sub(2),
+                            );
+                            if col >= inner.x && row >= inner.y
+                                && col < inner.x + inner.width
+                                && row < inner.y + inner.height
+                            {
+                                let cell_col = col - inner.x;
+                                let cell_row = row - inner.y;
+                                if let Some(pane) = self.ws().panes.get(&pane_id) {
+                                    if let Some(url) = pane.hyperlink_at(cell_row, cell_col) {
+                                        if let Err(e) = open::that_detached(&url) {
+                                            crate::dlog!("open hyperlink failed: {e} ({url})");
+                                        }
+                                        return;
+                                    }
+                                }
+                            }
                         }
 
                         // E7: detect double/triple click on the pane
@@ -1795,6 +1827,31 @@ impl App {
                     }
                 }
                 AppEvent::PtyOutput(_) => {}
+                AppEvent::ClipboardWrite(text) => {
+                    self.copy_to_clipboard(&text);
+                }
+                AppEvent::ClipboardReadRequested(pane_id) => {
+                    if self.config.osc52.allow_read {
+                        let text = {
+                            if self.clipboard.is_none() {
+                                self.clipboard = arboard::Clipboard::new().ok();
+                            }
+                            self.clipboard
+                                .as_mut()
+                                .and_then(|cb| cb.get_text().ok())
+                                .unwrap_or_default()
+                        };
+                        let encoded = crate::vt::osc::base64_encode(text.as_bytes());
+                        let response = format!("\x1b]52;c;{}\x1b\\", encoded);
+                        for ws in &mut self.workspaces {
+                            if let Some(pane) = ws.panes.get_mut(&pane_id) {
+                                let _ = pane.write_input(response.as_bytes());
+                                break;
+                            }
+                        }
+                    }
+                    // allow_read == false: silently ignore (PTY app will time out)
+                }
             }
         }
         if had_events {
@@ -1913,7 +1970,7 @@ fn extract_preview_selected_text(preview: &crate::preview::Preview, sr: u32, sc:
     }
 
     // Strip trailing empty lines only.
-    while out.last().map_or(false, |l| l.is_empty()) {
+    while out.last().is_some_and(|l| l.is_empty()) {
         out.pop();
     }
 
@@ -2065,8 +2122,8 @@ mod tests {
 
     #[test]
     fn test_focus_cycling() {
-        let ids = vec![1, 2, 3];
-        assert_eq!((0 + 1) % ids.len(), 1);
+        let ids = [1, 2, 3];
+        assert_eq!(1 % ids.len(), 1);
         assert_eq!((2 + 1) % ids.len(), 0);
     }
 }

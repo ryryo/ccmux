@@ -10,7 +10,7 @@
   "status": "in-progress",
   "reviewChecked": false,
   "progress": {
-    "completed": 60,
+    "completed": 70,
     "total": 90
   },
   "preflight": [],
@@ -1223,13 +1223,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — defaults match, plumbing OK; minor stacked-derive cleaned up after review"
+          }
         }
       ]
     },
@@ -1260,13 +1264,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — write unconditional, read gated by allow_read, base64_encode verified"
+          }
         }
       ]
     },
@@ -1297,13 +1305,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — hyperlink_at uses same visual-walk semantics as widget; non-hit falls through; CellAttrs unused-import suppressor removed after review"
+          }
         }
       ]
     },
@@ -1334,13 +1346,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — confirmed existing cursor gate is_focused && scroll_offset==0; PtyOutput no-op intentional"
+          }
         }
       ]
     },
@@ -1360,13 +1376,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — clippy -D warnings clean, release build OK, 145 tests passing"
+          }
         }
       ]
     },

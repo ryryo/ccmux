@@ -1,5 +1,6 @@
 mod app;
 mod claude_monitor;
+mod config;
 mod debug_log;
 mod filetree;
 mod mouse_encode;
@@ -71,8 +72,11 @@ fn main() -> Result<()> {
     // Get initial terminal size
     let size = terminal.size()?;
 
+    // Load user config (~/.config/ccmux/config.toml)
+    let cfg = config::Config::load();
+
     // Create app
-    let mut app = app::App::new(size.height, size.width)?;
+    let mut app = app::App::new(size.height, size.width, cfg)?;
     app.image_picker = image_picker;
 
     // Main event loop
@@ -106,11 +110,10 @@ fn run_event_loop(
         app.drain_pty_events();
 
         // Auto-refresh file tree if sidebar is visible
-        if app.ws().file_tree_visible {
-            if app.ws_mut().file_tree.auto_refresh_if_needed() {
+        if app.ws().file_tree_visible
+            && app.ws_mut().file_tree.auto_refresh_if_needed() {
                 app.dirty = true;
             }
-        }
 
         // After paste, wait a few frames for PTY echo to settle
         if app.paste_cooldown > 0 {

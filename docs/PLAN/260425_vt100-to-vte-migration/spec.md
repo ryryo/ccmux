@@ -431,16 +431,16 @@ Gate H: クリーンアップ・ドキュメント（Gate G 完了後）
 
 > config.toml 読込、ハイパーリンクとクリップボード、pane.rs の旧 API を新 Grid に向けて再配線
 
-- [ ] **F1**: [SIMPLE] config.rs: TOML 読み込み
-  > **Review F1**: _未記入_
-- [ ] **F2**: OSC 52 write/read の応答処理
-  > **Review F2**: _未記入_
-- [ ] **F3**: OSC 8 ハイパーリンク描画 + クリック処理
-  > **Review F3**: _未記入_
-- [ ] **F4**: [SIMPLE] cursor 描画と auto-scroll-to-bottom 動作
-  > **Review F4**: _未記入_
-- [ ] **F5**: ビルド通過 + warnings ゼロ確認
-  > **Review F5**: _未記入_
+- [x] **F1**: [SIMPLE] config.rs: TOML 読み込み
+  > **Review F1**: ✅ PASSED — PASS — defaults match, plumbing OK; minor stacked-derive cleaned up after review
+- [x] **F2**: OSC 52 write/read の応答処理
+  > **Review F2**: ✅ PASSED — PASS — write unconditional, read gated by allow_read, base64_encode verified
+- [x] **F3**: OSC 8 ハイパーリンク描画 + クリック処理
+  > **Review F3**: ✅ PASSED — PASS — hyperlink_at uses same visual-walk semantics as widget; non-hit falls through; CellAttrs unused-import suppressor removed after review
+- [x] **F4**: [SIMPLE] cursor 描画と auto-scroll-to-bottom 動作
+  > **Review F4**: ✅ PASSED — PASS — confirmed existing cursor gate is_focused && scroll_offset==0; PtyOutput no-op intentional
+- [x] **F5**: ビルド通過 + warnings ゼロ確認
+  > **Review F5**: ✅ PASSED — PASS — clippy -D warnings clean, release build OK, 145 tests passing
 
 **Gate F 通過条件**: 全 Review 結果記入欄が埋まり、総合判定が PASS であること
 

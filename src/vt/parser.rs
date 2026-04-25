@@ -198,7 +198,7 @@ impl Perform for Performer<'_> {
                 let next = (self.grid.cursor.col / 8 + 1) * 8;
                 self.grid.cursor.col = next.min(cols - 1);
             }
-            0x0A | 0x0B | 0x0C => self.line_feed(),
+            0x0A..=0x0C => self.line_feed(),
             0x0D => self.grid.cursor.col = 0,
             _ => {}
         }

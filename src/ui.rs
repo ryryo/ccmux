@@ -869,7 +869,7 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
         .ws()
         .panes
         .get(&focused_id)
-        .map_or(false, |p| p.is_claude_running());
+        .is_some_and(|p| p.is_claude_running());
 
     let mut right_spans = Vec::new();
 

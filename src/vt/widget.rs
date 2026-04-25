@@ -48,7 +48,13 @@ impl Widget for PtyPaneWidget<'_> {
                 }
                 let x = area.x + sx;
                 let y = area.y + screen_row as u16;
-                let style = to_ratatui_style(cell.fg, cell.bg, cell.attrs);
+                let mut style = to_ratatui_style(cell.fg, cell.bg, cell.attrs);
+                if cell.attrs.hyperlink != 0 {
+                    // OSC 8: visually mark the cell as a clickable link.
+                    style = style
+                        .fg(RColor::Rgb(0x4a, 0x9e, 0xff))
+                        .add_modifier(Modifier::UNDERLINED);
+                }
                 let has_selection = self
                     .selection
                     .as_ref()

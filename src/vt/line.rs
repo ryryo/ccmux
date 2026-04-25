@@ -137,7 +137,7 @@ mod tests {
         l.push_cell(ascii_cell('b'));
         l.truncate_to_width(3);
         assert_eq!(l.cell_width(), 3);
-        assert_eq!(l.cells.last().unwrap().is_continuation(), true);
+        assert!(l.cells.last().unwrap().is_continuation());
     }
 
     #[test]

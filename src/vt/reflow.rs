@@ -26,10 +26,8 @@ pub fn to_visual_rows<'a>(
 ) -> Vec<VisualRow<'a>> {
     let cols = (cols as usize).max(1);
     let mut out = Vec::new();
-    let mut idx = 0usize;
-    for line in scrollback.iter().chain(visible.iter()) {
+    for (idx, line) in scrollback.iter().chain(visible.iter()).enumerate() {
         push_chunks(line, idx, cols, &mut out);
-        idx += 1;
     }
     out
 }

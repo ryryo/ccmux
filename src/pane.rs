@@ -30,11 +30,11 @@ pub struct Pane {
 
 impl Pane {
     /// Create a new pane with a PTY shell.
-    pub fn new(id: usize, rows: u16, cols: u16, event_tx: Sender<AppEvent>) -> Result<Self> {
-        Self::new_with_cwd(id, rows, cols, event_tx, None)
+    pub fn new(id: usize, rows: u16, cols: u16, event_tx: Sender<AppEvent>, scrollback_max: usize) -> Result<Self> {
+        Self::new_with_cwd(id, rows, cols, event_tx, None, scrollback_max)
     }
 
-    pub fn new_with_cwd(id: usize, rows: u16, cols: u16, event_tx: Sender<AppEvent>, cwd: Option<PathBuf>) -> Result<Self> {
+    pub fn new_with_cwd(id: usize, rows: u16, cols: u16, event_tx: Sender<AppEvent>, cwd: Option<PathBuf>, scrollback_max: usize) -> Result<Self> {
         let pty_system = native_pty_system();
 
         let pty_size = PtySize {
@@ -78,8 +78,7 @@ impl Pane {
             .take_writer()
             .context("Failed to take PTY writer")?;
 
-        // Scrollback buffer: 10000 lines of history
-        let terminal = Arc::new(Mutex::new(Terminal::new(rows, cols, 10000)));
+        let terminal = Arc::new(Mutex::new(Terminal::new(rows, cols, scrollback_max)));
         let pane_title = Arc::new(Mutex::new(String::new()));
 
         let reader = pair
@@ -246,6 +245,41 @@ impl Pane {
         term.grid.modes.mouse_sgr_encoding
     }
 
+    /// Resolve the OSC 8 hyperlink target at the given screen position
+    /// inside the pane content area, accounting for the current
+    /// scrollback offset. `screen_row` is 0-based from the top of the
+    /// visible area; `screen_col` is the visual column. Returns the URL
+    /// string if a hyperlink is registered for that cell.
+    pub fn hyperlink_at(&self, screen_row: u16, screen_col: u16) -> Option<String> {
+        use crate::vt::reflow::to_visual_rows;
+        let term = self.terminal.lock().ok()?;
+        let area_height = term.grid.rows as usize;
+        let buffer = term.grid.current_buffer();
+        let visual = to_visual_rows(&buffer.scrollback, &buffer.visible, term.grid.cols);
+        let scroll_offset = self
+            .scroll_offset
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let total = visual.len();
+        let bottom = total.saturating_sub(scroll_offset);
+        let top = bottom.saturating_sub(area_height);
+        let vrow = visual.get(top + screen_row as usize)?;
+        let mut sx: u16 = 0;
+        for cell in vrow.cells.iter() {
+            if cell.width == 0 {
+                continue;
+            }
+            let next = sx.saturating_add(cell.width as u16);
+            if screen_col >= sx && screen_col < next {
+                if cell.attrs.hyperlink == 0 {
+                    return None;
+                }
+                return term.grid.hyperlinks.get(cell.attrs.hyperlink).map(|s| s.to_string());
+            }
+            sx = next;
+        }
+        None
+    }
+
     /// Current window title (set by OSC 0/2). Empty when none was sent.
     #[allow(dead_code)]
     pub fn title(&self) -> String {
@@ -309,10 +343,14 @@ fn pty_reader_thread(
                         TerminalEvent::CwdChanged(path) => {
                             let _ = event_tx.send(AppEvent::CwdChanged(pane_id, path));
                         }
-                        TerminalEvent::Bell
-                        | TerminalEvent::ClipboardWrite(_)
-                        | TerminalEvent::ClipboardReadRequested => {
-                            // F-gate features not wired yet
+                        TerminalEvent::ClipboardWrite(text) => {
+                            let _ = event_tx.send(AppEvent::ClipboardWrite(text));
+                        }
+                        TerminalEvent::ClipboardReadRequested => {
+                            let _ = event_tx.send(AppEvent::ClipboardReadRequested(pane_id));
+                        }
+                        TerminalEvent::Bell => {
+                            // BEL: no UI yet
                         }
                     }
                 }
