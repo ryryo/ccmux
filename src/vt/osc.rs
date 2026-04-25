@@ -59,7 +59,29 @@ pub fn dispatch(grid: &mut Grid, params: &[&[u8]], events: &mut Vec<TerminalEven
 
 fn parse_file_uri(uri: &str) -> Option<PathBuf> {
     let rest = uri.strip_prefix("file://")?;
-    let path = rest.find('/').map(|i| &rest[i..]).unwrap_or(rest);
+    // file:///path → empty hostname, take "/path"
+    // file://host/path → skip "host", take "/path"
+    let path = if rest.starts_with('/') {
+        rest
+    } else {
+        let slash = rest.find('/')?;
+        &rest[slash..]
+    };
+
+    // On Windows/MSYS2, Git-Bash emits paths like /c/Users/... — convert to C:\Users\...
+    #[cfg(windows)]
+    {
+        let bytes = path.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0] == b'/'
+            && bytes[1].is_ascii_alphabetic()
+            && bytes[2] == b'/'
+        {
+            let drive = bytes[1].to_ascii_uppercase() as char;
+            let win = format!("{}:{}", drive, path[2..].replace('/', "\\"));
+            return Some(PathBuf::from(win));
+        }
+    }
     Some(PathBuf::from(path))
 }
 

@@ -10,7 +10,7 @@
   "status": "in-progress",
   "reviewChecked": false,
   "progress": {
-    "completed": 36,
+    "completed": 46,
     "total": 90
   },
   "preflight": [],
@@ -776,13 +776,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PtyPaneWidget が Widget trait を実装、to_visual_rows で reflow 後に scroll_offset で viewport を切り出し描画。CJK 連続セル(width=0)はスキップ、wide cell は x+1 を空シンボルで埋める ratatui 慣用パターン。Quality/Conventions/Correctness 3並列 PASS。"
+          }
         }
       ]
     },
@@ -808,13 +812,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "to_ratatui_style と color_to_rat で Color/CellAttrs → ratatui Style 変換。BOLD/ITALIC/UNDERLINE/REVERSE/DIM/STRIKETHROUGH/BLINK 全網羅。テスト 4 件 (色変換 3 + 属性合成 1)。"
+          }
         }
       ]
     },
@@ -840,13 +848,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "render_terminal_content を PtyPaneWidget 呼び出しに置換。selection は (screen_row, screen_col)→bool クロージャ予述で TextSelection を vt 層から疎結合化。cursor 描画は scroll_offset==0 のときのみ frame.set_cursor_position。Correctness が指摘した cursor の reflow 整合 (信頼度 85, MEDIUM) は Gate E (選択/カーソル) で対応予定。"
+          }
         }
       ]
     },
@@ -872,13 +884,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 1,
+            "summary": "parser: vt100::Parser → terminal: vt::Terminal に置換。pty_reader_thread が drain_events で TitleChanged/CwdChanged を取り出して title Mutex / AppEvent::CwdChanged に橋渡し。Bell/Clipboard は F-gate で配線。scroll_offset を Pane 側 AtomicUsize に移動 (UI 状態は VT 状態と分離)。extract_osc7/extract_osc_title (~110 行) を削除。Correctness 指摘 (信頼度 95, HIGH): Windows /c/Users/... → C:\\Users\\... 変換が抜けていたため vt::osc::parse_file_uri に #[cfg(windows)] ブロックを追加して修正。"
+          }
         }
       ]
     },
@@ -909,13 +925,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "Pane::title() アクセサを追加 (#[allow(dead_code)])。claude_monitor は title を直接参照していなかったため呼び出し変更は不要。既存 Arc<Mutex<String>> 経路は is_claude_running() でまだ使用中 (削除は spec も「可能」表現で必須ではない)。"
+          }
         }
       ]
     },

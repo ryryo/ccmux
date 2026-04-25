@@ -1103,8 +1103,7 @@ impl App {
             let relative_y = click_row.saturating_sub(inner.y) as f32;
             let ratio = relative_y / inner.height.max(1) as f32;
             let target_scroll = ((1.0 - ratio) * max_scroll as f32) as usize;
-            let mut parser = pane.parser.lock().unwrap_or_else(|e| e.into_inner());
-            parser.screen_mut().set_scrollback(target_scroll);
+            pane.set_scroll_offset(target_scroll);
         }
     }
 
@@ -1680,32 +1679,37 @@ fn dir_name(path: &std::path::Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
-/// Extract text from a pane's vt100 screen within a selection range.
+/// Extract text from a pane's visible screen within a selection range.
+/// Coordinates are screen-relative (row 0 = top of visible area).
 fn extract_selected_text(pane: &Pane, sr: u32, sc: u32, er: u32, ec: u32) -> String {
-    let parser = pane.parser.lock().unwrap_or_else(|e| e.into_inner());
-    let screen = parser.screen();
+    let term = pane.terminal.lock().unwrap_or_else(|e| e.into_inner());
+    let buf = term.grid.current_buffer();
     let mut lines = Vec::new();
 
     for row in sr..=er {
         let mut line = String::new();
-        let col_start = if row == sr { sc } else { 0 };
-        let col_end = if row == er { ec } else { 999 };
-
-        for col in col_start..=col_end {
-            if let Some(cell) = screen.cell(row as u16, col as u16) {
-                let contents = cell.contents();
-                if contents.is_empty() {
-                    line.push(' ');
-                } else {
-                    line.push_str(contents);
-                }
+        let row_idx = row as usize;
+        let line_ref = match buf.visible.get(row_idx) {
+            Some(l) => l,
+            None => break,
+        };
+        let col_start = if row == sr { sc } else { 0 } as usize;
+        let col_end = if row == er {
+            ec as usize
+        } else {
+            line_ref.cells.len().saturating_sub(1)
+        };
+        for col in col_start..=col_end.min(line_ref.cells.len().saturating_sub(1)) {
+            let cell = &line_ref.cells[col];
+            if cell.width == 0 {
+                continue;
             }
+            line.push(if cell.ch == '\0' { ' ' } else { cell.ch });
         }
         lines.push(line.trim_end().to_string());
     }
 
-    // Remove trailing empty lines
-    while lines.last().map_or(false, |l| l.is_empty()) {
+    while lines.last().is_some_and(|l| l.is_empty()) {
         lines.pop();
     }
 

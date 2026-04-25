@@ -8,13 +8,14 @@ use anyhow::{Context, Result};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
 use crate::app::AppEvent;
+use crate::vt::parser::{Terminal, TerminalEvent};
 
-/// A terminal pane wrapping a PTY and vt100 parser.
+/// A terminal pane wrapping a PTY and the in-house vt::Terminal parser.
 pub struct Pane {
     pub id: usize,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
-    pub parser: Arc<Mutex<vt100::Parser>>,
+    pub terminal: Arc<Mutex<Terminal>>,
     child: Box<dyn Child + Send + Sync>,
     _reader_handle: thread::JoinHandle<()>,
     last_rows: u16,
@@ -22,7 +23,9 @@ pub struct Pane {
     pub exited: bool,
     pub title: Arc<Mutex<String>>,
     pub cwd: PathBuf,
-    pub total_scrollback: Arc<std::sync::atomic::AtomicUsize>,
+    /// UI-side scroll offset into the scrollback. 0 = live (bottom). Larger
+    /// values move the view back into history.
+    pub scroll_offset: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl Pane {
@@ -76,7 +79,7 @@ impl Pane {
             .context("Failed to take PTY writer")?;
 
         // Scrollback buffer: 10000 lines of history
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 10000)));
+        let terminal = Arc::new(Mutex::new(Terminal::new(rows, cols, 10000)));
         let pane_title = Arc::new(Mutex::new(String::new()));
 
         let reader = pair
@@ -84,19 +87,18 @@ impl Pane {
             .try_clone_reader()
             .context("Failed to clone PTY reader")?;
 
-        let parser_clone = Arc::clone(&parser);
+        let terminal_clone = Arc::clone(&terminal);
         let title_clone = Arc::clone(&pane_title);
-        let scrollback_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let scrollback_clone = Arc::clone(&scrollback_counter);
+        let scroll_offset = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let reader_handle = thread::spawn(move || {
-            pty_reader_thread(reader, parser_clone, title_clone, scrollback_clone, id, event_tx);
+            pty_reader_thread(reader, terminal_clone, title_clone, id, event_tx);
         });
 
         let mut pane = Self {
             id,
             master: pair.master,
             writer,
-            parser,
+            terminal,
             child,
             _reader_handle: reader_handle,
             last_rows: rows,
@@ -104,7 +106,7 @@ impl Pane {
             exited: false,
             title: pane_title,
             cwd: work_dir,
-            total_scrollback: scrollback_counter,
+            scroll_offset,
         };
 
         // Inject OSC 7 hook after shell starts
@@ -165,58 +167,72 @@ impl Pane {
             })
             .context("Failed to resize PTY")?;
 
-        let mut parser = self.parser.lock().unwrap_or_else(|e| e.into_inner());
-        parser.screen_mut().set_size(rows, cols);
+        let mut term = self.terminal.lock().unwrap_or_else(|e| e.into_inner());
+        term.resize(rows, cols);
         // Clear the screen buffer to avoid rendering stale content at the new size.
         // The TUI app (e.g. Claude Code) receives SIGWINCH and will redraw.
         // A brief blank frame is preferable to overlapping garbled output.
-        parser.process(b"\x1b[2J\x1b[H");
+        term.process(b"\x1b[2J\x1b[H");
 
         Ok(true)
     }
 
-    /// Scroll the terminal view up (into scrollback history).
-    pub fn scroll_up(&self, lines: usize) {
-        let mut parser = self.parser.lock().unwrap_or_else(|e| e.into_inner());
-        let current = parser.screen().scrollback();
-        parser.screen_mut().set_scrollback(current + lines);
+    fn max_scroll(&self) -> usize {
+        let term = self.terminal.lock().unwrap_or_else(|e| e.into_inner());
+        term.grid.current_buffer().scrollback.len()
     }
 
-    /// Get scrollbar info: (current_offset, max_offset).
-    /// max_offset is estimated by trying to scroll to a large value and checking.
+    /// Scroll the terminal view up (into scrollback history).
+    pub fn scroll_up(&self, lines: usize) {
+        let max = self.max_scroll();
+        let cur = self.scroll_offset.load(std::sync::atomic::Ordering::Relaxed);
+        self.scroll_offset
+            .store((cur + lines).min(max), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Get scrollbar info: (current_offset, total_lines).
     pub fn scrollbar_info(&self) -> (usize, usize) {
-        let parser = self.parser.lock().unwrap_or_else(|e| e.into_inner());
-        let screen = parser.screen();
-        let current = screen.scrollback();
-        // Estimate max by checking: set_scrollback clamps to actual scrollback length
-        // We can't query it directly, so use the stored total_scrollback as estimate
-        let total = self.total_scrollback.load(std::sync::atomic::Ordering::Relaxed);
+        let term = self.terminal.lock().unwrap_or_else(|e| e.into_inner());
+        let total = term.grid.current_buffer().scrollback.len() + term.grid.rows as usize;
+        let current = self.scroll_offset.load(std::sync::atomic::Ordering::Relaxed);
         (current, total)
     }
 
     /// Scroll the terminal view down (towards current output).
     pub fn scroll_down(&self, lines: usize) {
-        let mut parser = self.parser.lock().unwrap_or_else(|e| e.into_inner());
-        let current = parser.screen().scrollback();
-        parser.screen_mut().set_scrollback(current.saturating_sub(lines));
+        let cur = self.scroll_offset.load(std::sync::atomic::Ordering::Relaxed);
+        self.scroll_offset
+            .store(cur.saturating_sub(lines), std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Reset scroll to the bottom (live view).
     pub fn scroll_reset(&self) {
-        let mut parser = self.parser.lock().unwrap_or_else(|e| e.into_inner());
-        parser.screen_mut().set_scrollback(0);
+        self.scroll_offset
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Set scroll offset directly (clamped to current scrollback length).
+    pub fn set_scroll_offset(&self, target: usize) {
+        let max = self.max_scroll();
+        self.scroll_offset
+            .store(target.min(max), std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Check if the terminal is scrolled back.
     pub fn is_scrolled_back(&self) -> bool {
-        let parser = self.parser.lock().unwrap_or_else(|e| e.into_inner());
-        parser.screen().scrollback() > 0
+        self.scroll_offset.load(std::sync::atomic::Ordering::Relaxed) > 0
     }
 
     /// Check if the PTY application has enabled bracketed paste mode.
     pub fn is_bracketed_paste_enabled(&self) -> bool {
-        let parser = self.parser.lock().unwrap_or_else(|e| e.into_inner());
-        parser.screen().bracketed_paste()
+        let term = self.terminal.lock().unwrap_or_else(|e| e.into_inner());
+        term.grid.modes.bracketed_paste
+    }
+
+    /// Current window title (set by OSC 0/2). Empty when none was sent.
+    #[allow(dead_code)]
+    pub fn title(&self) -> String {
+        self.title.lock().map(|t| t.clone()).unwrap_or_default()
     }
 
     /// Check if Claude Code is running in this pane (by window title).
@@ -242,12 +258,11 @@ impl Drop for Pane {
     }
 }
 
-/// Background thread that reads PTY output and feeds it to vt100 parser.
+/// Background thread that reads PTY output and feeds it to vt::Terminal.
 fn pty_reader_thread(
     mut reader: Box<dyn Read + Send>,
-    parser: Arc<Mutex<vt100::Parser>>,
+    terminal: Arc<Mutex<Terminal>>,
     title: Arc<Mutex<String>>,
-    scrollback_count: Arc<std::sync::atomic::AtomicUsize>,
     pane_id: usize,
     event_tx: Sender<AppEvent>,
 ) {
@@ -261,27 +276,30 @@ fn pty_reader_thread(
             Ok(n) => {
                 let data = &buf[..n];
 
-                // Track scrollback lines (count newlines)
-                let newlines = data.iter().filter(|&&b| b == b'\n').count();
-                if newlines > 0 {
-                    scrollback_count.fetch_add(newlines, std::sync::atomic::Ordering::Relaxed);
-                }
+                let events = {
+                    let mut term = terminal.lock().unwrap_or_else(|e| e.into_inner());
+                    term.process(data);
+                    term.drain_events()
+                };
 
-                // Detect OSC 7 (cwd notification)
-                if let Some(path) = extract_osc7(data) {
-                    let _ = event_tx.send(AppEvent::CwdChanged(pane_id, path));
-                }
-
-                // Detect OSC 0/2 (window title) — used to detect Claude Code
-                if let Some(new_title) = extract_osc_title(data) {
-                    if let Ok(mut t) = title.lock() {
-                        *t = new_title;
+                for ev in events {
+                    match ev {
+                        TerminalEvent::TitleChanged(new_title) => {
+                            if let Ok(mut t) = title.lock() {
+                                *t = new_title;
+                            }
+                        }
+                        TerminalEvent::CwdChanged(path) => {
+                            let _ = event_tx.send(AppEvent::CwdChanged(pane_id, path));
+                        }
+                        TerminalEvent::Bell
+                        | TerminalEvent::ClipboardWrite(_)
+                        | TerminalEvent::ClipboardReadRequested => {
+                            // F-gate features not wired yet
+                        }
                     }
                 }
 
-                let mut parser = parser.lock().unwrap_or_else(|e| e.into_inner());
-                parser.process(data);
-                drop(parser);
                 let _ = event_tx.send(AppEvent::PtyOutput(pane_id));
             }
             Err(_) => {
@@ -289,75 +307,6 @@ fn pty_reader_thread(
             }
         }
     }
-}
-
-/// Extract path from OSC 7 escape sequence: \x1b]7;file://HOST/PATH(\x07|\x1b\\)
-fn extract_osc7(data: &[u8]) -> Option<PathBuf> {
-    let s = std::str::from_utf8(data).ok()?;
-
-    // Look for OSC 7 pattern
-    let marker = "\x1b]7;";
-    let start = s.find(marker)?;
-    let rest = &s[start + marker.len()..];
-
-    // Find the terminator: BEL (\x07) or ST (\x1b\\)
-    let end = rest.find('\x07')
-        .or_else(|| rest.find("\x1b\\"));
-
-    let uri = &rest[..end?];
-
-    // Parse file:// URI → extract path
-    // Formats: file://hostname/path, file:///path, file:///c/Users/...
-    if let Some(path_str) = uri.strip_prefix("file://") {
-        // Skip hostname part: find the path starting with /
-        // file://hostname/path → skip "hostname", take "/path"
-        // file:///path → hostname is empty, take "/path"
-        let path = if path_str.starts_with('/') {
-            // No hostname (file:///path)
-            path_str
-        } else if let Some(slash_pos) = path_str.find('/') {
-            // Has hostname (file://host/path)
-            &path_str[slash_pos..]
-        } else {
-            return None;
-        };
-
-        // On Windows/MSYS2, convert /c/Users/... to C:\Users\...
-        #[cfg(windows)]
-        {
-            let path_bytes = path.as_bytes();
-            if path_bytes.len() >= 3
-                && path_bytes[0] == b'/'
-                && path_bytes[1].is_ascii_alphabetic()
-                && path_bytes[2] == b'/'
-            {
-                let drive = path_bytes[1].to_ascii_uppercase() as char;
-                let rest = &path[2..];
-                let win_path = format!("{}:{}", drive, rest.replace('/', "\\"));
-                return Some(PathBuf::from(win_path));
-            }
-        }
-        return Some(PathBuf::from(path));
-    }
-
-    None
-}
-
-/// Extract window title from OSC 0 or OSC 2: \x1b]0;TITLE\x07 or \x1b]2;TITLE\x07
-fn extract_osc_title(data: &[u8]) -> Option<String> {
-    let s = std::str::from_utf8(data).ok()?;
-    // Look for OSC 0 or OSC 2
-    for marker in &["\x1b]0;", "\x1b]2;"] {
-        if let Some(start) = s.find(marker) {
-            let rest = &s[start + marker.len()..];
-            let end = rest.find('\x07')
-                .or_else(|| rest.find("\x1b\\"));
-            if let Some(end) = end {
-                return Some(rest[..end].to_string());
-            }
-        }
-    }
-    None
 }
 
 /// Detect the appropriate shell to launch.

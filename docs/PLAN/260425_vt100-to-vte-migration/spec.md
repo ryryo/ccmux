@@ -393,16 +393,16 @@ Gate H: クリーンアップ・ドキュメント（Gate G 完了後）
 
 > PtyPaneWidget で Grid → ratatui::Buffer に注入、選択オーバーレイ/カーソル/scrollbar を扱う
 
-- [ ] **D1**: PtyPaneWidget の骨格
-  > **Review D1**: _未記入_
-- [ ] **D2**: Color/CellAttrs → ratatui::Style 変換
-  > **Review D2**: _未記入_
-- [ ] **D3**: ui.rs を PtyPaneWidget 経由に切替
-  > **Review D3**: _未記入_
-- [ ] **D4**: pane.rs: vt::Terminal 保持に置換
-  > **Review D4**: _未記入_
-- [ ] **D5**: [SIMPLE] claude_monitor のタイトル取得経路を新 API に
-  > **Review D5**: _未記入_
+- [x] **D1**: PtyPaneWidget の骨格
+  > **Review D1**: ✅ PASSED — PtyPaneWidget が Widget trait を実装、to_visual_rows で reflow 後に scroll_offset で viewport を切り出し描画。CJK 連続セル(width=0)はスキップ、wide cell は x+1 を空シンボルで埋める ratatui 慣用パターン。Quality/Conventions/Correctness 3並列 PASS。
+- [x] **D2**: Color/CellAttrs → ratatui::Style 変換
+  > **Review D2**: ✅ PASSED — to_ratatui_style と color_to_rat で Color/CellAttrs → ratatui Style 変換。BOLD/ITALIC/UNDERLINE/REVERSE/DIM/STRIKETHROUGH/BLINK 全網羅。テスト 4 件 (色変換 3 + 属性合成 1)。
+- [x] **D3**: ui.rs を PtyPaneWidget 経由に切替
+  > **Review D3**: ✅ PASSED — render_terminal_content を PtyPaneWidget 呼び出しに置換。selection は (screen_row, screen_col)→bool クロージャ予述で TextSelection を vt 層から疎結合化。cursor 描画は scroll_offset==0 のときのみ frame.set_cursor_position。Correctness が指摘した cursor の reflow 整合 (信頼度 85, MEDIUM) は Gate E (選択/カーソル) で対応予定。
+- [x] **D4**: pane.rs: vt::Terminal 保持に置換
+  > **Review D4**: ✅ PASSED (FIX 1回) — parser: vt100::Parser → terminal: vt::Terminal に置換。pty_reader_thread が drain_events で TitleChanged/CwdChanged を取り出して title Mutex / AppEvent::CwdChanged に橋渡し。Bell/Clipboard は F-gate で配線。scroll_offset を Pane 側 AtomicUsize に移動 (UI 状態は VT 状態と分離)。extract_osc7/extract_osc_title (~110 行) を削除。Correctness 指摘 (信頼度 95, HIGH): Windows /c/Users/... → C:\Users\... 変換が抜けていたため vt::osc::parse_file_uri に #[cfg(windows)] ブロックを追加して修正。
+- [x] **D5**: [SIMPLE] claude_monitor のタイトル取得経路を新 API に
+  > **Review D5**: ✅ PASSED — Pane::title() アクセサを追加 (#[allow(dead_code)])。claude_monitor は title を直接参照していなかったため呼び出し変更は不要。既存 Arc<Mutex<String>> 経路は is_claude_running() でまだ使用中 (削除は spec も「可能」表現で必須ではない)。
 
 **Gate D 通過条件**: 全 Review 結果記入欄が埋まり、総合判定が PASS であること
 

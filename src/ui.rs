@@ -504,78 +504,52 @@ fn render_terminal_content(
     frame: &mut Frame,
     area: Rect,
 ) {
-    let parser = pane.parser.lock().unwrap_or_else(|e| e.into_inner());
-    let screen = parser.screen();
+    use ratatui::widgets::Widget;
+    let rows = area.height;
+    let cols = area.width;
 
-    let rows = area.height as usize;
-    let cols = area.width as usize;
-    let buf = frame.buffer_mut();
+    let scroll_offset = pane.scroll_offset.load(std::sync::atomic::Ordering::Relaxed);
+    let (cursor_pos, hide_cursor) = {
+        let term = pane.terminal.lock().unwrap_or_else(|e| e.into_inner());
+        (
+            (term.grid.cursor.row, term.grid.cursor.col),
+            !term.grid.cursor.visible,
+        )
+    };
 
-    for row in 0..rows {
-        for col in 0..cols {
-            let cell = screen.cell(row as u16, col as u16);
-            if let Some(cell) = cell {
-                let x = area.x + col as u16;
-                let y = area.y + row as u16;
+    let selection_predicate: Option<Box<dyn Fn(u32, u32) -> bool>> = selection.map(|s| {
+        let s = s.clone();
+        let f: Box<dyn Fn(u32, u32) -> bool> = Box::new(move |r: u32, c: u32| {
+            let (sr, sc, er, ec) = s.normalized();
+            (sr != er || sc != ec) && s.contains(r, c)
+        });
+        f
+    });
 
-                let contents = cell.contents();
-                let display_char = if contents.is_empty() { " " } else { contents };
-
-                let fg = vt100_color_to_ratatui(cell.fgcolor());
-                let bg = vt100_color_to_ratatui(cell.bgcolor());
-
-                let mut modifiers = Modifier::empty();
-                if cell.bold() { modifiers |= Modifier::BOLD; }
-                if cell.italic() { modifiers |= Modifier::ITALIC; }
-                if cell.underline() { modifiers |= Modifier::UNDERLINED; }
-
-                let style = if cell.inverse() {
-                    Style::default().fg(bg).bg(fg).add_modifier(modifiers)
-                } else {
-                    Style::default().fg(fg).bg(bg).add_modifier(modifiers)
-                };
-
-                // Apply selection highlight (only if dragged, not single click)
-                let has_selection = selection.map_or(false, |s| {
-                    let (sr, sc, er, ec) = s.normalized();
-                    (sr != er || sc != ec) && s.contains(row as u32, col as u32)
-                });
-                let final_style = if has_selection {
-                    Style::default()
-                        .fg(Color::Rgb(0xff, 0xff, 0xff))
-                        .bg(FOCUS_BORDER)
-                } else {
-                    style
-                };
-
-                if let Some(buf_cell) = buf.cell_mut((x, y)) {
-                    buf_cell.set_symbol(display_char);
-                    buf_cell.set_style(final_style);
-                }
-            }
-        }
+    {
+        let term = pane.terminal.lock().unwrap_or_else(|e| e.into_inner());
+        let widget = crate::vt::widget::PtyPaneWidget {
+            terminal: &term,
+            scroll_offset,
+            selection: selection_predicate,
+            focused: is_focused,
+        };
+        widget.render(area, frame.buffer_mut());
     }
 
-    // Show cursor when focused.
-    // For non-Claude panes, respect the PTY's hide_cursor request.
-    // For Claude Code, always show because Claude relies on the terminal cursor.
-    let show_cursor = is_focused && (!screen.hide_cursor() || pane.is_claude_running());
+    // Cursor: show only on live view (scroll_offset == 0). For Claude Code we
+    // always show even if the PTY requested hide, since it draws its own block.
+    let show_cursor =
+        is_focused && scroll_offset == 0 && (!hide_cursor || pane.is_claude_running());
     if show_cursor {
-        let cursor = screen.cursor_position();
-        // Place the OS cursor at the position the PTY reports. Modern Ink-based
-        // TUIs (Claude Code) want the physical cursor at the logical input
-        // position so that IME candidate windows align correctly. A previous
-        // -1 shift (intended to overlap Claude's own block glyph) caused CJK
-        // glyphs to be visually mangled; removing it follows the convention
-        // used by other multiplexers (Zellij, etc.).
-        let cursor_x = area.x + cursor.1;
-        let cursor_y = area.y + cursor.0;
-        if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
+        let cursor_x = area.x + cursor_pos.1;
+        let cursor_y = area.y + cursor_pos.0;
+        if cursor_x < area.x + cols && cursor_y < area.y + rows {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
     }
 
-    drop(parser); // release lock before scrollbar_info
+    let rows = rows as usize;
 
     // Scrollbar on the right edge
     let (scroll_offset, total_lines) = pane.scrollbar_info();
@@ -1013,10 +987,3 @@ fn truncate_to_width(s: &str, max_width: usize) -> String {
     result
 }
 
-fn vt100_color_to_ratatui(color: vt100::Color) -> Color {
-    match color {
-        vt100::Color::Default => Color::Reset,
-        vt100::Color::Idx(idx) => Color::Indexed(idx),
-        vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
-    }
-}
