@@ -358,23 +358,23 @@ Gate H: クリーンアップ・ドキュメント（Gate G 完了後）
 > vte::Parser::Performer を実装し、CSI/OSC/SGR/DECSTBM を Grid に反映
 
 - [x] **B1**: vte::Performer 実装の骨格
-  > **Review B1**: _未記入_
+  > **Review B1**: ✅ PASSED — Terminal/Performer 骨格 + print 最低実装。3 unit tests PASS。
 - [x] **B2**: [TDD] print: 文字書き込み + auto-wrap + CJK ワイド処理
-  > **Review B2**: _未記入_
+  > **Review B2**: ✅ PASSED — auto-wrap / DECAWM off / CJK ワイド + continuation / combining 無視。6 unit tests PASS。
 - [x] **B3**: [TDD] execute: 制御文字 (LF/CR/BS/HT/BEL)
-  > **Review B3**: _未記入_
+  > **Review B3**: ✅ PASSED — LF/CR/BS/HT/BEL/VT/FF を実装、scroll_bottom で line_feed が scroll_up_in_region 経由でスクロール。6 unit tests PASS。
 - [x] **B4**: [TDD] スクロール処理 + scrollback 保存条件
-  > **Review B4**: _未記入_
+  > **Review B4**: ✅ PASSED — Grid::scroll_up_in_region で xterm 規則 (top==0 && !alt) を集約。DECSTBM 部分領域 + alt screen + top!=0 の各ケースを検証。4 unit tests PASS。
 - [x] **B5**: [TDD] CSI ハンドラ: SGR (色 + 属性)
-  > **Review B5**: _未記入_
+  > **Review B5**: ✅ PASSED — SGR ハンドラ: 8/16/256/Truecolor + bold/dim/italic/underline/blink/reverse/strike + 解除コード + reset。7 unit tests PASS。
 - [x] **B6**: [TDD] CSI ハンドラ: カーソル移動 + 消去
-  > **Review B6**: _未記入_
+  > **Review B6**: ✅ PASSED — CUP/CUU/CUD/CUF/CUB/CHA/VPA/ED/EL/DECSTBM/DECSC/DECRC/SU/SD/IL/DL/ICH/DCH/ECH。Claude Code 想定の DECSTBM+LF が scrollback に積む流れを統合確認。10 unit tests PASS。
 - [x] **B7**: [TDD] CSI プライベートモード: alt screen / DECAWM / マウス / bracketed paste
-  > **Review B7**: _未記入_
+  > **Review B7**: ✅ PASSED — DECSET/DECRST: DECAWM(7)/DECTCEM(25)/alt 47/1047/1049/mouse 1000/1002/1003/1006/bracketed paste 2004。1049 で cursor save/restore 動作確認。5 unit tests PASS。
 - [x] **B8**: [TDD] OSC ディスパッチ: 7 / 0 / 2 / 8 / 52
-  > **Review B8**: _未記入_
+  > **Review B8**: ✅ PASSED — OSC 0/2/7/8/52 + 自前 base64 デコード + TerminalEvent 発行。OSC 8 の dedup と空 URL リセット、52 の write/read request を検証。5 unit tests PASS。
 - [x] **B9**: [TDD] ESC ディスパッチ: RIS / DECSC / DECRC / RI
-  > **Review B9**: _未記入_
+  > **Review B9**: ✅ PASSED — ESC c (RIS) / ESC 7 (DECSC) / ESC 8 (DECRC) / ESC M (RI)。RI が scroll_top で空行挿入する分岐を含む。4 unit tests PASS。
 
 **Gate B 通過条件**: 全 Review 結果記入欄が埋まり、総合判定が PASS であること
 

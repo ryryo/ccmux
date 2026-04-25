@@ -376,7 +376,11 @@
           "kind": "review",
           "title": "Step 2 — Review",
           "checked": true,
-          "review": null
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "Terminal/Performer 骨格 + print 最低実装。3 unit tests PASS。"
+          }
         }
       ]
     },
@@ -408,7 +412,11 @@
           "kind": "review",
           "title": "Step 2 — Review",
           "checked": true,
-          "review": null
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "auto-wrap / DECAWM off / CJK ワイド + continuation / combining 無視。6 unit tests PASS。"
+          }
         }
       ]
     },
@@ -440,7 +448,11 @@
           "kind": "review",
           "title": "Step 2 — Review",
           "checked": true,
-          "review": null
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "LF/CR/BS/HT/BEL/VT/FF を実装、scroll_bottom で line_feed が scroll_up_in_region 経由でスクロール。6 unit tests PASS。"
+          }
         }
       ]
     },
@@ -472,7 +484,11 @@
           "kind": "review",
           "title": "Step 2 — Review",
           "checked": true,
-          "review": null
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "Grid::scroll_up_in_region で xterm 規則 (top==0 && !alt) を集約。DECSTBM 部分領域 + alt screen + top!=0 の各ケースを検証。4 unit tests PASS。"
+          }
         }
       ]
     },
@@ -509,7 +525,11 @@
           "kind": "review",
           "title": "Step 2 — Review",
           "checked": true,
-          "review": null
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "SGR ハンドラ: 8/16/256/Truecolor + bold/dim/italic/underline/blink/reverse/strike + 解除コード + reset。7 unit tests PASS。"
+          }
         }
       ]
     },
@@ -541,7 +561,11 @@
           "kind": "review",
           "title": "Step 2 — Review",
           "checked": true,
-          "review": null
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "CUP/CUU/CUD/CUF/CUB/CHA/VPA/ED/EL/DECSTBM/DECSC/DECRC/SU/SD/IL/DL/ICH/DCH/ECH。Claude Code 想定の DECSTBM+LF が scrollback に積む流れを統合確認。10 unit tests PASS。"
+          }
         }
       ]
     },
@@ -573,7 +597,11 @@
           "kind": "review",
           "title": "Step 2 — Review",
           "checked": true,
-          "review": null
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "DECSET/DECRST: DECAWM(7)/DECTCEM(25)/alt 47/1047/1049/mouse 1000/1002/1003/1006/bracketed paste 2004。1049 で cursor save/restore 動作確認。5 unit tests PASS。"
+          }
         }
       ]
     },
@@ -610,7 +638,11 @@
           "kind": "review",
           "title": "Step 2 — Review",
           "checked": true,
-          "review": null
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "OSC 0/2/7/8/52 + 自前 base64 デコード + TerminalEvent 発行。OSC 8 の dedup と空 URL リセット、52 の write/read request を検証。5 unit tests PASS。"
+          }
         }
       ]
     },
@@ -642,7 +674,11 @@
           "kind": "review",
           "title": "Step 2 — Review",
           "checked": true,
-          "review": null
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "ESC c (RIS) / ESC 7 (DECSC) / ESC 8 (DECRC) / ESC M (RI)。RI が scroll_top で空行挿入する分岐を含む。4 unit tests PASS。"
+          }
         }
       ]
     },
