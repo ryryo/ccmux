@@ -1841,8 +1841,7 @@ impl App {
                                 .and_then(|cb| cb.get_text().ok())
                                 .unwrap_or_default()
                         };
-                        let encoded = crate::vt::osc::base64_encode(text.as_bytes());
-                        let response = format!("\x1b]52;c;{}\x1b\\", encoded);
+                        let response = crate::vt::osc::osc52_read_response(&text);
                         for ws in &mut self.workspaces {
                             if let Some(pane) = ws.panes.get_mut(&pane_id) {
                                 let _ = pane.write_input(response.as_bytes());

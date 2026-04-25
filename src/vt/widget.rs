@@ -148,6 +148,44 @@ mod tests {
     }
 
     #[test]
+    fn render_paints_osc8_hyperlink_with_blue_underline() {
+        use ratatui::buffer::Buffer as RatBuffer;
+        use ratatui::layout::Rect;
+        use ratatui::widgets::Widget;
+
+        let mut term = crate::vt::parser::Terminal::new(2, 20, 0);
+        // OSC 8 open + "hi" + OSC 8 close
+        term.process(b"\x1b]8;;https://example.com\x1b\\hi\x1b]8;;\x1b\\");
+
+        let area = Rect::new(0, 0, 20, 2);
+        let mut buf = RatBuffer::empty(area);
+        let widget = PtyPaneWidget {
+            terminal: &term,
+            scroll_offset: 0,
+            selection: None,
+            focused: false,
+        };
+        widget.render(area, &mut buf);
+
+        // 'h' at (0,0), 'i' at (1,0) should both carry the hyperlink style.
+        for x in 0..2 {
+            let cell = &buf[(x, 0)];
+            assert_eq!(
+                cell.style().fg,
+                Some(RColor::Rgb(0x4a, 0x9e, 0xff)),
+                "cell ({x},0) fg should be hyperlink blue"
+            );
+            assert!(
+                cell.style().add_modifier.contains(Modifier::UNDERLINED),
+                "cell ({x},0) should be underlined"
+            );
+        }
+        // Cell past the link should not have hyperlink styling.
+        let plain = &buf[(2, 0)];
+        assert_ne!(plain.style().fg, Some(RColor::Rgb(0x4a, 0x9e, 0xff)));
+    }
+
+    #[test]
     fn attrs_combine_into_modifier() {
         let mut a = CellAttrs::default();
         a.set(CellAttrs::BOLD);

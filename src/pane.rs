@@ -251,7 +251,7 @@ impl Pane {
     /// visible area; `screen_col` is the visual column. Returns the URL
     /// string if a hyperlink is registered for that cell.
     pub fn hyperlink_at(&self, screen_row: u16, screen_col: u16) -> Option<String> {
-        use crate::vt::reflow::to_visual_rows;
+        use crate::vt::reflow::{resolve_hyperlink_at, to_visual_rows};
         let term = self.terminal.lock().ok()?;
         let area_height = term.grid.rows as usize;
         let buffer = term.grid.current_buffer();
@@ -259,25 +259,15 @@ impl Pane {
         let scroll_offset = self
             .scroll_offset
             .load(std::sync::atomic::Ordering::Relaxed);
-        let total = visual.len();
-        let bottom = total.saturating_sub(scroll_offset);
-        let top = bottom.saturating_sub(area_height);
-        let vrow = visual.get(top + screen_row as usize)?;
-        let mut sx: u16 = 0;
-        for cell in vrow.cells.iter() {
-            if cell.width == 0 {
-                continue;
-            }
-            let next = sx.saturating_add(cell.width as u16);
-            if screen_col >= sx && screen_col < next {
-                if cell.attrs.hyperlink == 0 {
-                    return None;
-                }
-                return term.grid.hyperlinks.get(cell.attrs.hyperlink).map(|s| s.to_string());
-            }
-            sx = next;
-        }
-        None
+        resolve_hyperlink_at(
+            &visual,
+            &term.grid.hyperlinks,
+            scroll_offset,
+            area_height,
+            screen_row,
+            screen_col,
+        )
+        .map(|s| s.to_string())
     }
 
     /// Current window title (set by OSC 0/2). Empty when none was sent.

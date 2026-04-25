@@ -1,4 +1,5 @@
 use super::cell::Cell;
+use super::grid::HyperlinkRegistry;
 use super::line::LogicalLine;
 use super::scrollback::Scrollback;
 use super::selection::LogicalPos;
@@ -128,6 +129,48 @@ pub fn screen_to_logical(
         line: row.line_index,
         col: row.start_cell_idx + row.cells.len(),
     })
+}
+
+/// Resolve the OSC 8 hyperlink target at a screen position over a set of
+/// visual rows. Mirrors the visual-column walk performed by
+/// `vt::widget::PtyPaneWidget::render` so click coords always land on the
+/// same cell that was painted. Returns `None` when the target row is empty,
+/// the column lies past the last printable cell, or the cell has no
+/// hyperlink id.
+pub fn resolve_hyperlink_at<'a>(
+    visual_rows: &[VisualRow<'_>],
+    hyperlinks: &'a HyperlinkRegistry,
+    scroll_offset: usize,
+    area_height: usize,
+    screen_row: u16,
+    screen_col: u16,
+) -> Option<&'a str> {
+    let total = visual_rows.len();
+    if total == 0 || area_height == 0 {
+        return None;
+    }
+    let bottom = total.saturating_sub(scroll_offset);
+    let top = bottom.saturating_sub(area_height);
+    let target = top + screen_row as usize;
+    if target >= bottom {
+        return None;
+    }
+    let row = visual_rows[target];
+    let mut sx: u16 = 0;
+    for cell in row.cells.iter() {
+        if cell.width == 0 {
+            continue;
+        }
+        let next = sx.saturating_add(cell.width as u16);
+        if screen_col >= sx && screen_col < next {
+            if cell.attrs.hyperlink == 0 {
+                return None;
+            }
+            return hyperlinks.get(cell.attrs.hyperlink);
+        }
+        sx = next;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -273,5 +316,83 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].line_index, 0);
         assert_eq!(rows[1].line_index, 1);
+    }
+
+    fn line_with_hyperlink(s: &str, link_id: u32) -> LogicalLine {
+        let mut l = LogicalLine::empty();
+        for ch in s.chars() {
+            let mut cell = Cell { ch, width: 1, ..Cell::default() };
+            cell.attrs.hyperlink = link_id;
+            l.push_cell(cell);
+        }
+        l
+    }
+
+    #[test]
+    fn resolve_hyperlink_at_returns_url_on_hit() {
+        let mut hl = HyperlinkRegistry::default();
+        let id = hl.register("https://example.com");
+        let visible = vec![line_with_hyperlink("hello", id)];
+        let sb = Scrollback::new(0);
+        let rows = to_visual_rows(&sb, &visible, 10);
+        let url = resolve_hyperlink_at(&rows, &hl, 0, 1, 0, 2);
+        assert_eq!(url, Some("https://example.com"));
+    }
+
+    #[test]
+    fn resolve_hyperlink_at_returns_none_on_plain_cell() {
+        let hl = HyperlinkRegistry::default();
+        let visible = vec![line_of_ascii("hello")];
+        let sb = Scrollback::new(0);
+        let rows = to_visual_rows(&sb, &visible, 10);
+        assert_eq!(resolve_hyperlink_at(&rows, &hl, 0, 1, 0, 2), None);
+    }
+
+    #[test]
+    fn resolve_hyperlink_at_respects_scroll_offset() {
+        // Scrollback row has the link, visible row is plain.
+        let mut hl = HyperlinkRegistry::default();
+        let id = hl.register("https://link/");
+        let mut sb = Scrollback::new(10);
+        sb.push(line_with_hyperlink("link", id));
+        let visible = vec![line_of_ascii("here")];
+        let rows = to_visual_rows(&sb, &visible, 10);
+        // area_height=1, scroll_offset=0 → only the visible row is in view.
+        assert_eq!(resolve_hyperlink_at(&rows, &hl, 0, 1, 0, 0), None);
+        // area_height=1, scroll_offset=1 → scrollback row is in view.
+        assert_eq!(
+            resolve_hyperlink_at(&rows, &hl, 1, 1, 0, 0),
+            Some("https://link/"),
+        );
+    }
+
+    #[test]
+    fn resolve_hyperlink_at_past_eol_returns_none() {
+        let mut hl = HyperlinkRegistry::default();
+        let id = hl.register("https://x/");
+        let visible = vec![line_with_hyperlink("hi", id)];
+        let sb = Scrollback::new(0);
+        let rows = to_visual_rows(&sb, &visible, 10);
+        // col 5 is past the 2-cell line.
+        assert_eq!(resolve_hyperlink_at(&rows, &hl, 0, 1, 0, 5), None);
+    }
+
+    #[test]
+    fn resolve_hyperlink_at_cjk_continuation_resolves_to_main() {
+        // Wide-char cell with hyperlink id on the main cell only; the
+        // continuation cell has width=0 and is skipped during the walk.
+        // Both visual columns 0 and 1 should resolve to the same URL.
+        let mut hl = HyperlinkRegistry::default();
+        let id = hl.register("https://wide/");
+        let mut line = LogicalLine::empty();
+        let mut main = Cell { ch: 'あ', width: 2, ..Cell::default() };
+        main.attrs.hyperlink = id;
+        line.push_cell(main);
+        line.push_cell(Cell { ch: '\0', width: 0, ..Cell::default() });
+        let visible = vec![line];
+        let sb = Scrollback::new(0);
+        let rows = to_visual_rows(&sb, &visible, 10);
+        assert_eq!(resolve_hyperlink_at(&rows, &hl, 0, 1, 0, 0), Some("https://wide/"));
+        assert_eq!(resolve_hyperlink_at(&rows, &hl, 0, 1, 0, 1), Some("https://wide/"));
     }
 }

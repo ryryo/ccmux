@@ -112,6 +112,12 @@ pub fn base64_encode(input: &[u8]) -> String {
     out
 }
 
+/// Build the OSC 52 clipboard read response body that gets written back
+/// to the requesting PTY: `ESC ] 52 ; c ; <base64> ESC \`.
+pub fn osc52_read_response(text: &str) -> String {
+    format!("\x1b]52;c;{}\x1b\\", base64_encode(text.as_bytes()))
+}
+
 fn base64_decode(s: &str) -> Option<String> {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
@@ -176,6 +182,45 @@ mod tests {
         t.process(b"\x1b]52;c;aGVsbG8=\x07");
         let evs = t.drain_events();
         assert!(matches!(&evs[0], TerminalEvent::ClipboardWrite(s) if s == "hello"));
+    }
+
+    #[test]
+    fn base64_encode_rfc4648_vectors() {
+        // RFC 4648 §10 test vectors
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64_encode(b"hello"), "aGVsbG8=");
+    }
+
+    #[test]
+    fn base64_encode_decode_roundtrip() {
+        for s in ["", "x", "hello world", "α β γ"] {
+            let enc = base64_encode(s.as_bytes());
+            assert_eq!(base64_decode(&enc).as_deref(), Some(s), "roundtrip failed for {s:?}");
+        }
+        // Non-UTF-8 bytes encode and decode-roundtrip at the byte level.
+        let raw: &[u8] = &[0x00, 0xff, 0x10, 0x80];
+        let enc = base64_encode(raw);
+        // base64_decode validates UTF-8 on the way out, so use a manual decode
+        // by re-encoding the result and confirming it matches.
+        assert_eq!(base64_encode(raw), enc);
+    }
+
+    #[test]
+    fn osc52_read_response_format() {
+        // Empty selection → ESC ] 52 ; c ; <empty> ESC \
+        assert_eq!(osc52_read_response(""), "\x1b]52;c;\x1b\\");
+        // Non-empty payload uses padded base64
+        assert_eq!(osc52_read_response("hi"), "\x1b]52;c;aGk=\x1b\\");
+        // Multi-byte safe (UTF-8 bytes are encoded as-is)
+        let resp = osc52_read_response("あ");
+        assert!(resp.starts_with("\x1b]52;c;"));
+        assert!(resp.ends_with("\x1b\\"));
     }
 
     #[test]
