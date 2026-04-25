@@ -49,12 +49,8 @@ impl Widget for PtyPaneWidget<'_> {
                 let x = area.x + sx;
                 let y = area.y + screen_row as u16;
                 let mut style = to_ratatui_style(cell.fg, cell.bg, cell.attrs);
-                // OSC 8: visually mark cells in a hyperlink span. Skip blank
-                // cells — Claude Code (and others) include trailing spaces
-                // inside link spans, and underlining those spaces draws long
-                // black bars across the screen for empty-looking regions.
-                let is_blank = cell.ch == ' ' || cell.ch == '\0';
-                if cell.attrs.hyperlink != 0 && !is_blank {
+                if cell.attrs.hyperlink != 0 {
+                    // OSC 8: visually mark the cell as a clickable link.
                     style = style
                         .fg(RColor::Rgb(0x4a, 0x9e, 0xff))
                         .add_modifier(Modifier::UNDERLINED);
@@ -152,15 +148,14 @@ mod tests {
     }
 
     #[test]
-    fn render_paints_osc8_hyperlink_only_on_non_blank_cells() {
+    fn render_paints_osc8_hyperlink_with_blue_underline() {
         use ratatui::buffer::Buffer as RatBuffer;
         use ratatui::layout::Rect;
         use ratatui::widgets::Widget;
 
         let mut term = crate::vt::parser::Terminal::new(2, 20, 0);
-        // Hyperlink span includes trailing spaces — Claude Code does this,
-        // and it caused long horizontal underlines on empty-looking regions.
-        term.process(b"\x1b]8;;https://example.com\x1b\\hi   \x1b]8;;\x1b\\");
+        // OSC 8 open + "hi" + OSC 8 close
+        term.process(b"\x1b]8;;https://example.com\x1b\\hi\x1b]8;;\x1b\\");
 
         let area = Rect::new(0, 0, 20, 2);
         let mut buf = RatBuffer::empty(area);
@@ -172,7 +167,7 @@ mod tests {
         };
         widget.render(area, &mut buf);
 
-        // 'h' (0,0) and 'i' (1,0): visible link text → blue + underlined.
+        // 'h' at (0,0), 'i' at (1,0) should both carry the hyperlink style.
         for x in 0..2 {
             let cell = &buf[(x, 0)];
             assert_eq!(
@@ -185,20 +180,9 @@ mod tests {
                 "cell ({x},0) should be underlined"
             );
         }
-        // Cells (2..5, 0): trailing spaces inside the link span — must NOT
-        // be styled as hyperlinks (regression test for the long-underline bug).
-        for x in 2..5 {
-            let cell = &buf[(x, 0)];
-            assert_ne!(
-                cell.style().fg,
-                Some(RColor::Rgb(0x4a, 0x9e, 0xff)),
-                "cell ({x},0) is a blank inside link span and must not be coloured"
-            );
-            assert!(
-                !cell.style().add_modifier.contains(Modifier::UNDERLINED),
-                "cell ({x},0) is a blank inside link span and must not be underlined"
-            );
-        }
+        // Cell past the link should not have hyperlink styling.
+        let plain = &buf[(2, 0)];
+        assert_ne!(plain.style().fg, Some(RColor::Rgb(0x4a, 0x9e, 0xff)));
     }
 
     #[test]
