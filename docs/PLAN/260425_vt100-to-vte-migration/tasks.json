@@ -1,0 +1,857 @@
+{
+  "schemaVersion": 2,
+  "spec": {
+    "slug": "vt100-to-vte-migration",
+    "title": "vt100 → vte パーサ + 自前 Grid への Big-bang 置換",
+    "summary": "ccmux の VT エミュレーション層を vt100 crate から vte パーサ + 自前 Grid/Scrollback/Selection モデルに全面置換し、DECSTBM 環境でのスクロールバック動作と scrollback 含む範囲選択/コピーを獲得する。",
+    "createdDate": "2026-04-25",
+    "specPath": "spec.md"
+  },
+  "status": "not-started",
+  "reviewChecked": false,
+  "progress": { "completed": 0, "total": 76 },
+  "preflight": [],
+  "gates": [
+    {
+      "id": "A",
+      "title": "基盤データ型",
+      "description": "Cell/Line/Buffer/Grid/Scrollback の基本型を定義し、TDD で固める",
+      "dependencies": [],
+      "passCondition": "全 Review 結果記入欄が埋まり、総合判定が PASS であること"
+    },
+    {
+      "id": "B",
+      "title": "vte パーサ統合",
+      "description": "vte::Parser::Performer を実装し、CSI/OSC/SGR/DECSTBM を Grid に反映",
+      "dependencies": ["A"],
+      "passCondition": "全 Review 結果記入欄が埋まり、総合判定が PASS であること"
+    },
+    {
+      "id": "C",
+      "title": "Reflow & リサイズ",
+      "description": "soft wrap + 論理行/表示行モデルを実装、リサイズ時の整合性を保つ",
+      "dependencies": ["B"],
+      "passCondition": "全 Review 結果記入欄が埋まり、総合判定が PASS であること"
+    },
+    {
+      "id": "D",
+      "title": "描画統合",
+      "description": "PtyPaneWidget で Grid → ratatui::Buffer に注入、選択オーバーレイ/カーソル/scrollbar を扱う",
+      "dependencies": ["C"],
+      "passCondition": "全 Review 結果記入欄が埋まり、総合判定が PASS であること"
+    },
+    {
+      "id": "E",
+      "title": "マウス/選択モデル",
+      "description": "マウスパススルー・選択範囲モデル・コピー・スクロール統合",
+      "dependencies": ["D"],
+      "passCondition": "全 Review 結果記入欄が埋まり、総合判定が PASS であること"
+    },
+    {
+      "id": "F",
+      "title": "設定・OSC 8/52・既存 API 再配線",
+      "description": "config.toml 読込、ハイパーリンクとクリップボード、pane.rs の旧 API を新 Grid に向けて再配線",
+      "dependencies": ["E"],
+      "passCondition": "全 Review 結果記入欄が埋まり、総合判定が PASS であること"
+    },
+    {
+      "id": "G",
+      "title": "テスト・回帰検証",
+      "description": "スナップショットテストと実アプリ手動チェックリストの整備",
+      "dependencies": ["F"],
+      "passCondition": "全 Review 結果記入欄が埋まり、総合判定が PASS であること"
+    },
+    {
+      "id": "H",
+      "title": "クリーンアップ・ドキュメント",
+      "description": "vt100 依存削除確認、CLAUDE.md とバグレポートの追記",
+      "dependencies": ["G"],
+      "passCondition": "全 Review 結果記入欄が埋まり、総合判定が PASS であること"
+    }
+  ],
+  "todos": [
+    {
+      "id": "A1",
+      "gate": "A",
+      "title": "Cargo.toml 依存差し替え",
+      "description": "vt100 を削除し vte/unicode-width/arboard/toml/serde を追加",
+      "tdd": false,
+      "dependencies": [],
+      "affectedFiles": [
+        { "path": "Cargo.toml", "operation": "modify", "summary": "依存関係更新" }
+      ],
+      "impl": "Cargo.toml の [dependencies] から `vt100` を削除し、以下を追加:\n```toml\nvte = \"0.13\"          # 安定版を選定。0.x 系は parser API 安定\nunicode-width = \"0.1\"\narboard = { version = \"3\", default-features = false, features = [\"wayland-data-control\"] }\nserde = { version = \"1\", features = [\"derive\"] }\ntoml = \"0.8\"\n```\n`cargo build` を実行し依存解決を確認。この時点では src/ がまだ vt100 を参照しているのでビルドは失敗してよい(以降の Todo で修正)。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "A2",
+      "gate": "A",
+      "title": "[TDD] Cell/Color/CellAttrs 型",
+      "description": "セルの基本データ型と単純な操作を TDD で実装",
+      "tdd": true,
+      "dependencies": ["A1"],
+      "affectedFiles": [
+        { "path": "src/vt/cell.rs", "operation": "create", "summary": "Cell, Color, CellAttrs 定義" },
+        { "path": "src/vt/mod.rs", "operation": "create", "summary": "モジュール宣言の枠" }
+      ],
+      "impl": "`src/vt/mod.rs` に `pub mod cell;` を追加し、`src/main.rs` 直下で `mod vt;` 宣言。\n\n`src/vt/cell.rs`:\n- `Color` enum: `Default`, `Indexed(u8)`, `Rgb(u8,u8,u8)`\n- `CellAttrs`: bitflags 風(bold/italic/underline/reverse/dim/strikethrough/blink) + `hyperlink: u32` (0=なし)\n- `Cell { ch: char, width: u8, fg: Color, bg: Color, attrs: CellAttrs }`\n- `Cell::default()` は空白文字 + Default 色\n- `Cell::is_continuation(&self) -> bool { self.width == 0 }` (CJK ワイドの続きセル判定)\n\n単体テスト:\n- Cell::default() のフィールド確認\n- Color の各バリアント比較\n- CellAttrs::set/clear/contains の挙動\n- is_continuation のフラグ判定",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "A3",
+      "gate": "A",
+      "title": "[TDD] LogicalLine 型 + soft-wrap メタ",
+      "description": "論理行を表す型を定義、continued フラグで連結を表現",
+      "tdd": true,
+      "dependencies": ["A2"],
+      "affectedFiles": [
+        { "path": "src/vt/line.rs", "operation": "create", "summary": "LogicalLine" }
+      ],
+      "impl": "`src/vt/line.rs`:\n- `LogicalLine { cells: Vec<Cell>, continued: bool }`\n  - `continued` は直前の論理行から物理改行なしに続く場合 true (将来の貼り付け検出に備える)\n- `LogicalLine::new(cols: usize) -> Self` で空白セルを cols 個用意\n- `LogicalLine::cell_width(&self) -> usize` 全セル width 合計 (continuation セルは 0 なので加算で合計が正しく出る)\n- `LogicalLine::truncate_to_width(&mut self, width: usize)` ワイドセル境界で正しく切る\n- `LogicalLine::push_cell(&mut self, cell: Cell)`\n- `LogicalLine::set_cell(&mut self, col: usize, cell: Cell)` ワイドセルを書くときは続きセル(width=0)を 1 つ後ろに置く\n\nテスト:\n- 空行 → cell_width 0\n- ASCII 文字を 5 つ書く → width 5\n- CJK 'あ' を書く → width 2、続きセルが続く\n- truncate_to_width(3) でワイド文字の境界を破壊しない (片半分が残らない)",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "A4",
+      "gate": "A",
+      "title": "[TDD] CJK 幅計算 width.rs",
+      "description": "unicode-width をラップして East Asian Ambiguous = narrow を保証",
+      "tdd": true,
+      "dependencies": ["A2"],
+      "affectedFiles": [
+        { "path": "src/vt/width.rs", "operation": "create", "summary": "char_width 関数" }
+      ],
+      "impl": "`src/vt/width.rs`:\n- `pub fn char_width(c: char) -> u8` を実装。`unicode_width::UnicodeWidthChar::width(c)` の結果を `u8` にキャスト。`None` の場合は 0 (制御文字扱い)。\n- East Asian Ambiguous は `unicode-width` のデフォルトが narrow なので追加処理不要 (将来 `width_cjk()` を使いたければ設定経由で切替)\n\nテスト:\n- 'a' → 1\n- 'あ' → 2\n- '\\t' → 0\n- '\\u{0301}' (combining acute) → 0\n- '±' (EA Ambiguous) → 1 (narrow)\n- 絵文字 '🦀' → 2",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "A5",
+      "gate": "A",
+      "title": "[TDD] Scrollback ring buffer",
+      "description": "max_lines までの論理行を VecDeque で保持、push/pop/iter を提供",
+      "tdd": true,
+      "dependencies": ["A3"],
+      "affectedFiles": [
+        { "path": "src/vt/scrollback.rs", "operation": "create", "summary": "Scrollback" }
+      ],
+      "impl": "`src/vt/scrollback.rs`:\n- `pub struct Scrollback { lines: VecDeque<LogicalLine>, max_lines: usize }`\n- `Scrollback::new(max_lines: usize) -> Self`\n- `push(&mut self, line: LogicalLine)`: 末尾に追加。len > max_lines なら front を pop\n- `len(&self) -> usize`\n- `iter(&self) -> impl Iterator<Item = &LogicalLine>` (古い→新しい順)\n- `get(&self, index: usize) -> Option<&LogicalLine>`\n- `set_max_lines(&mut self, n: usize)`: 縮小時は古い行から削除\n\nテスト:\n- 空 scrollback の len = 0\n- max_lines=3 で 5 行 push → len=3, 最古行は 3 行目\n- iter の順序が時系列\n- set_max_lines で縮小されること\n- get(out_of_range) が None",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "A6",
+      "gate": "A",
+      "title": "[TDD] Cursor + Buffer 構造体",
+      "description": "可視領域を持つ Buffer と Cursor を定義",
+      "tdd": true,
+      "dependencies": ["A3", "A5"],
+      "affectedFiles": [
+        { "path": "src/vt/grid.rs", "operation": "create", "summary": "Cursor, Buffer 部分" }
+      ],
+      "impl": "`src/vt/grid.rs`(まずは Cursor/Buffer のみ。Grid 全体は A7 で完成):\n- `Cursor { row: u16, col: u16, style: CellAttrs, fg: Color, bg: Color, visible: bool }`\n- `Buffer { visible: Vec<LogicalLine>, scrollback: Scrollback }`\n- `Buffer::new(rows: u16, cols: u16, scrollback_max: usize) -> Self`\n- `Buffer::resize_visible(&mut self, rows: u16, cols: u16)`: 行数を rows に合わせ、足りなければ空行追加、多ければ末尾切詰め\n- `Buffer::scroll_lines_off_top(&mut self, count: u16, save_to_scrollback: bool)`: 上から count 行を取り除く。save_to_scrollback=true なら scrollback に push、false なら破棄\n\nテスト:\n- Buffer::new で visible.len() == rows\n- resize_visible で長さが変わる\n- scroll_lines_off_top(2, true) で scrollback に 2 行入る、visible 末尾に空行 2 つ補充\n- save_to_scrollback=false なら scrollback に入らない",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "A7",
+      "gate": "A",
+      "title": "[TDD] Grid + alternate screen 切替 + DECSTBM 状態",
+      "description": "Grid 全体を組み立て、primary/alternate buffer 切替と scroll region 状態を管理",
+      "tdd": true,
+      "dependencies": ["A6"],
+      "affectedFiles": [
+        { "path": "src/vt/grid.rs", "operation": "modify", "summary": "Grid 完成" }
+      ],
+      "impl": "`Grid` 構造体を完成させる:\n- `Grid { rows, cols, cursor, saved_cursor, scroll_top, scroll_bottom, primary: Buffer, alternate: Buffer, use_alternate: bool, modes: TerminalModes, hyperlinks: HyperlinkRegistry, title: String, cwd: Option<PathBuf> }`\n- `TerminalModes`: `bracketed_paste: bool`, `mouse_x10: bool`, `mouse_button: bool`, `mouse_motion: bool`, `mouse_sgr_encoding: bool` (1006), `auto_wrap: bool` (DECAWM)\n- `HyperlinkRegistry { entries: Vec<String>, current: u32 }` (OSC 8 用)\n- `Grid::new(rows, cols, scrollback_max) -> Self` 初期値は scroll_top=0, scroll_bottom=rows-1, use_alternate=false, auto_wrap=true\n- `Grid::current_buffer(&self) -> &Buffer` / `current_buffer_mut`: use_alternate に従って primary/alternate を返す\n- `Grid::enter_alternate(&mut self)`: 切替時に alternate を空に、cursor 保存\n- `Grid::exit_alternate(&mut self)`: 戻すときは保存 cursor 復元\n- `Grid::set_scroll_region(&mut self, top: u16, bottom: u16)`: bottom < rows に clamp、top<=bottom を保証\n\nテスト:\n- 初期状態の scroll region\n- enter/exit_alternate で current_buffer が切り替わる\n- set_scroll_region(2, 10) の状態保持\n- 不正な値 (top>=bottom) は無視されること",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "B1",
+      "gate": "B",
+      "title": "vte::Performer 実装の骨格",
+      "description": "Grid を保持する Performer 構造体と print/execute スタブを置く",
+      "tdd": false,
+      "dependencies": ["A7"],
+      "affectedFiles": [
+        { "path": "src/vt/parser.rs", "operation": "create", "summary": "Performer 実装" },
+        { "path": "src/vt/mod.rs", "operation": "modify", "summary": "Terminal 公開 API 追加" }
+      ],
+      "impl": "`src/vt/parser.rs`:\n```rust\npub struct Terminal {\n    pub grid: Grid,\n    parser: vte::Parser,\n}\nimpl Terminal {\n    pub fn new(rows: u16, cols: u16, scrollback_max: usize) -> Self;\n    pub fn process(&mut self, bytes: &[u8]) {\n        let mut performer = Performer { grid: &mut self.grid, events: vec![] };\n        for b in bytes { self.parser.advance(&mut performer, *b); }\n    }\n    pub fn drain_events(&mut self) -> Vec<TerminalEvent>; // OSC 7/title などを上位へ\n}\nstruct Performer<'a> { grid: &'a mut Grid, events: Vec<TerminalEvent> }\nimpl vte::Perform for Performer<'_> { /* 各コールバック */ }\npub enum TerminalEvent { TitleChanged(String), CwdChanged(PathBuf), Bell }\n```\n各メソッドはまず空実装で、`print` だけは Cell を書き込む最低実装(以降の Todo で拡張)。\n\nテスト:\n- 'A' バイトを process → cursor が 1 進む、(0,0) に 'A' が入る",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "B2",
+      "gate": "B",
+      "title": "[TDD] print: 文字書き込み + auto-wrap + CJK ワイド処理",
+      "description": "Performer::print を完成させる",
+      "tdd": true,
+      "dependencies": ["B1"],
+      "affectedFiles": [
+        { "path": "src/vt/parser.rs", "operation": "modify", "summary": "print の本実装" }
+      ],
+      "impl": "`Performer::print(&mut self, c: char)`:\n1. width = `width::char_width(c)`\n2. if width == 0 → combining char。前のセルの ch をどうするかは簡略化のため無視 (ベースの ch のみ保持、後で改善)\n3. if cursor.col + width > cols かつ DECAWM 有効 → cursor を次行頭へ。次行が scroll_bottom 超えたら scroll_up を呼ぶ\n4. current_buffer の visible[cursor.row] の cursor.col に Cell { ch: c, width, fg: cursor.fg, bg: cursor.bg, attrs: cursor.style } を書く\n5. width == 2 なら次のセルに continuation cell (width=0) を書く\n6. cursor.col += width\n\nテスト:\n- 'ABC' → (0,0..2) に 'A','B','C'、cursor=(0,3)\n- cols=5 で 'ABCDEF' → 5 文字目で wrap、(1,0)='F'\n- 'あ' → (0,0)=Cell{width=2}、(0,1)=continuation\n- DECAWM off で行末に書くと cursor が cols-1 に張り付き上書き",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "B3",
+      "gate": "B",
+      "title": "[TDD] execute: 制御文字 (LF/CR/BS/HT/BEL)",
+      "description": "C0 制御文字をカーソル操作にマップ",
+      "tdd": true,
+      "dependencies": ["B2"],
+      "affectedFiles": [
+        { "path": "src/vt/parser.rs", "operation": "modify", "summary": "execute 実装" }
+      ],
+      "impl": "`Performer::execute(&mut self, b: u8)`:\n- 0x07 (BEL): events に Bell 追加\n- 0x08 (BS): cursor.col = cursor.col.saturating_sub(1)\n- 0x09 (HT): cursor.col = next tabstop (8 の倍数)、clamp to cols-1\n- 0x0A (LF): cursor.row += 1。scroll_bottom 超えたら scroll_up_one_line。scroll region 内なら region 内でスクロール\n- 0x0D (CR): cursor.col = 0\n\nテスト:\n- 'A\\nB' → A は (0,0)、cursor 改行後 'B' は (1,0)\n- 行末で LF → scroll、(0,0) に空行\n- BS で cursor が 0 を割らない\n- HT が cols-1 を超えない",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "B4",
+      "gate": "B",
+      "title": "[TDD] スクロール処理 + scrollback 保存条件",
+      "description": "xterm 仕様に従い scroll_top==0 かつ alt screen 非アクティブ時のみ scrollback に push",
+      "tdd": true,
+      "dependencies": ["B3"],
+      "affectedFiles": [
+        { "path": "src/vt/grid.rs", "operation": "modify", "summary": "scroll_up_in_region 実装" }
+      ],
+      "impl": "`Grid::scroll_up_in_region(&mut self, count: u16)`:\n```\nlet save = self.scroll_top == 0 && !self.use_alternate;\nlet buf = self.current_buffer_mut();\nfor _ in 0..count {\n    if save { buf.scroll_lines_off_top(1, true); }\n    else {\n        // scroll region 内だけ動かす: scroll_top..=scroll_bottom 範囲で 1 行押し出して破棄\n        buf.visible.remove(scroll_top as usize);\n        buf.visible.insert(scroll_bottom as usize, LogicalLine::new(self.cols as usize));\n    }\n}\n```\n注: save=true の時も scroll_region (top=0, bottom<rows-1) ではあるので、bottom より下の行は保護したい。実装は `scroll_top==0 && scroll_bottom == rows-1` 完全一致を「save」、それ以外を region 内回転に分岐するのが安全。**しかし xterm は top==0 だけで scrollback 保存する**。両方を試すなら top==0 をトリガとする xterm 流に合わせる(本仕様の決定 #8)。\n\n→ 採用: `save = scroll_top == 0 && !self.use_alternate`。bottom が rows-1 でない場合は scroll_top..=scroll_bottom 範囲で動かしつつ、最上行は scrollback に push する(これが本リファクタの本質)。\n\nテスト:\n- scroll_top=0, scroll_bottom=rows-1 で scroll_up_in_region(1) → scrollback に 1 行\n- scroll_top=0, scroll_bottom=rows-3 (Claude Code を模した DECSTBM) で scroll_up_in_region(1) → scrollback に 1 行 + 領域内回転 (★本リファクタの主目的)\n- alt screen で scroll_up_in_region(1) → scrollback に入らない\n- scroll_top=2 で scroll_up_in_region(1) → scrollback に入らない (上端が画面最上行ではない)",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "B5",
+      "gate": "B",
+      "title": "[TDD] CSI ハンドラ: SGR (色 + 属性)",
+      "description": "SGR パラメータ列を解釈して cursor の style/fg/bg を更新",
+      "tdd": true,
+      "dependencies": ["B4"],
+      "affectedFiles": [
+        { "path": "src/vt/csi.rs", "operation": "create", "summary": "SGR ハンドラ" },
+        { "path": "src/vt/parser.rs", "operation": "modify", "summary": "csi_dispatch から呼び出し" }
+      ],
+      "impl": "`csi.rs::handle_sgr(grid: &mut Grid, params: &[u16])`:\n- 0: reset (fg=Default, bg=Default, attrs クリア)\n- 1/2/3/4/5/7/8/9: bold/dim/italic/underline/blink/reverse/conceal/strikethrough\n- 22/23/24/25/27/28/29: 各属性解除\n- 30-37: fg Indexed(p-30)\n- 38;5;n: fg Indexed(n)\n- 38;2;r;g;b: fg Rgb\n- 39: fg Default\n- 40-47, 48, 49: bg 系統\n- 90-97 / 100-107: bright fg/bg\n\n`csi_dispatch` で `final_byte == b'm'` の時に handle_sgr を呼ぶ。\n\nテスト:\n- ESC[31m → cursor.fg == Indexed(1)\n- ESC[1;33m → bold + Indexed(3)\n- ESC[38;2;255;128;0m → Rgb(255,128,0)\n- ESC[0m → デフォルトに戻る",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "B6",
+      "gate": "B",
+      "title": "[TDD] CSI ハンドラ: カーソル移動 + 消去",
+      "description": "CUP/CUU/CUD/CUF/CUB/ED/EL/DECSTBM などを実装",
+      "tdd": true,
+      "dependencies": ["B5"],
+      "affectedFiles": [
+        { "path": "src/vt/csi.rs", "operation": "modify", "summary": "カーソル/消去/scroll region" }
+      ],
+      "impl": "csi_dispatch の final_byte で分岐:\n- A (CUU): row -= n\n- B (CUD): row += n\n- C (CUF): col += n\n- D (CUB): col -= n\n- H/f (CUP): row, col 設定 (1-origin → 0-origin)\n- J (ED): 0=cursor 以降, 1=先頭から cursor まで, 2=全画面消去, 3=scrollback クリア\n- K (EL): 0=cursor 以降, 1=先頭から cursor まで, 2=行全体\n- r (DECSTBM): scroll_top, scroll_bottom 設定 (★ Claude Code の主トリガ)\n- s/u: cursor 保存/復元\n- S/T (SU/SD): scroll up/down\n- L/M (IL/DL): 行挿入/削除\n- @ (ICH): 文字挿入\n- P (DCH): 文字削除\n- X (ECH): cursor 位置から n 文字を空白で消去 (cursor は移動せず)\n\nテスト:\n- ESC[2;3H → cursor=(1,2) (1-origin → 0-origin)\n- ESC[2J → 全画面が空白\n- ESC[5;20r → scroll_top=4, scroll_bottom=19\n- DECSTBM 後に何度も LF を送ると領域内回転 + scrollback 保存(B4 と統合確認)",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "B7",
+      "gate": "B",
+      "title": "[TDD] CSI プライベートモード: alt screen / DECAWM / マウス / bracketed paste",
+      "description": "ESC[?...h/l 系を解釈してモード状態に反映",
+      "tdd": true,
+      "dependencies": ["B6"],
+      "affectedFiles": [
+        { "path": "src/vt/csi.rs", "operation": "modify", "summary": "DECSET/DECRST" }
+      ],
+      "impl": "intermediate に `?` がある場合のプライベートモード:\n- 7 (DECAWM): auto_wrap\n- 25 (DECTCEM): cursor.visible\n- 47 / 1047 / 1049: alt screen 切替 (1049 は cursor 保存も)\n- 1000 (X11 mouse), 1002 (button event), 1003 (any event), 1006 (SGR encoding), 1015 (urxvt): modes に反映\n- 2004: bracketed_paste\n\nset (h) と reset (l) のみ。他は無視。\n\nテスト:\n- ESC[?1049h → use_alternate=true, cursor 保存される\n- ESC[?1049l → 元に戻り cursor も復元\n- ESC[?2004h → bracketed_paste=true\n- ESC[?1006h → mouse_sgr_encoding=true",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "B8",
+      "gate": "B",
+      "title": "[TDD] OSC ディスパッチ: 7 / 0 / 2 / 8 / 52",
+      "description": "実用 OSC を解釈して TerminalEvent を生成",
+      "tdd": true,
+      "dependencies": ["B7"],
+      "affectedFiles": [
+        { "path": "src/vt/osc.rs", "operation": "create", "summary": "OSC ハンドラ" },
+        { "path": "src/vt/parser.rs", "operation": "modify", "summary": "osc_dispatch 呼び出し" }
+      ],
+      "impl": "`osc.rs::dispatch(grid: &mut Grid, params: &[&[u8]], events: &mut Vec<TerminalEvent>)`:\n- params[0] が \"0\" or \"2\": タイトル → TerminalEvent::TitleChanged。grid.title 更新\n- \"7\": cwd URI (file://...) → パス抽出して TerminalEvent::CwdChanged。grid.cwd 更新\n- \"8\": ハイパーリンク。\"8;params;URL\" → URL を hyperlinks.entries に登録、cursor.attrs.hyperlink を設定。空 URL なら 0 にリセット\n- \"52\": \"52;c;<base64>\" → write 時はデコードして TerminalEvent::ClipboardWrite(text)。read 要求 (空 base64) は TerminalEvent::ClipboardReadRequested を発行 (実際の応答は config によって)\n\n他の OSC は無視 (廃棄)。\n\nテスト:\n- OSC \"0;mytitle\" → events に TitleChanged(\"mytitle\")\n- OSC \"7;file:///home/user\" → CwdChanged(\"/home/user\")\n- OSC \"8;;https://example.com\" → cursor.attrs.hyperlink != 0、entries に URL 登録\n- OSC \"8;;\" → cursor.attrs.hyperlink = 0\n- OSC \"52;c;aGVsbG8=\" → ClipboardWrite(\"hello\")",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "B9",
+      "gate": "B",
+      "title": "[TDD] ESC ディスパッチ: RIS / DECSC / DECRC / RI",
+      "description": "ESC c, ESC 7, ESC 8, ESC M を実装",
+      "tdd": true,
+      "dependencies": ["B8"],
+      "affectedFiles": [
+        { "path": "src/vt/parser.rs", "operation": "modify", "summary": "esc_dispatch" }
+      ],
+      "impl": "esc_dispatch:\n- 'c' (RIS): Grid 完全リセット (alt 状態は exit、cursor=(0,0)、属性デフォルト、scroll region デフォルト)\n- '7' (DECSC): saved_cursor = Some(cursor.clone())\n- '8' (DECRC): saved_cursor を復元\n- 'M' (RI): cursor.row -= 1。scroll_top を割ったら scroll down (空行を上に挿入)\n\nテスト:\n- RIS でカーソル/属性が初期化\n- DECSC + 移動 + DECRC で元位置に戻る\n- RI で scroll_top に居る時に空行が挿入されること",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "C1",
+      "gate": "C",
+      "title": "[TDD] Reflow: 論理行 → 表示行への射影",
+      "description": "Reflow ロジックを reflow.rs に切り出し",
+      "tdd": true,
+      "dependencies": ["B9"],
+      "affectedFiles": [
+        { "path": "src/vt/reflow.rs", "operation": "create", "summary": "to_visual_rows" }
+      ],
+      "impl": "`reflow.rs`:\n- `pub struct VisualRow<'a> { pub line_index: usize, pub start_col: usize, pub cells: &'a [Cell] }`\n  (line_index は scrollback+visible 通し、start_col は論理行内の開始列)\n- `pub fn to_visual_rows<'a>(scrollback: &'a Scrollback, visible: &'a [LogicalLine], cols: u16) -> Vec<VisualRow<'a>>`:\n  - scrollback.iter() → visible.iter() を順に走査\n  - 各論理行を cols で chunk 分割 (CJK 境界保護)\n  - VisualRow を順に push\n\nテスト:\n- cols=10、5 文字の論理行 → VisualRow 1 つ\n- cols=10、25 文字の論理行 → VisualRow 3 つ (10/10/5)\n- CJK 'あいうえお' (width 10) を cols=8 → 1 つ目は 8 で切る (4 文字)、2 つ目に残り。境界破壊しない\n- 空 visible の場合の挙動",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "C2",
+      "gate": "C",
+      "title": "[TDD] Terminal::resize: visible 行数調整 + scroll region クランプ",
+      "description": "リサイズ API を Terminal 公開メソッドとして実装",
+      "tdd": true,
+      "dependencies": ["C1"],
+      "affectedFiles": [
+        { "path": "src/vt/parser.rs", "operation": "modify", "summary": "Terminal::resize" }
+      ],
+      "impl": "`Terminal::resize(&mut self, rows: u16, cols: u16)`:\n1. grid.rows, grid.cols を更新\n2. primary/alternate buffer の visible を rows 行に揃える\n3. cursor を新しい範囲内にクランプ\n4. scroll region を `scroll_top.min(rows-2), scroll_bottom.min(rows-1)` でクランプ\n\n論理行は不変 (reflow は描画時に都度実行) なので scrollback の整合は不要。\n\nテスト:\n- resize で rows が増える → visible に空行追加\n- rows が減る → 末尾切詰め (cursor 位置を超えないようクランプ)\n- cols 変更だけでも scrollback 中身は変わらない\n- scroll region がクランプされる",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "D1",
+      "gate": "D",
+      "title": "PtyPaneWidget の骨格",
+      "description": "ratatui::Widget を実装する PtyPaneWidget を作る",
+      "tdd": false,
+      "dependencies": ["C2"],
+      "affectedFiles": [
+        { "path": "src/vt/widget.rs", "operation": "create", "summary": "PtyPaneWidget" }
+      ],
+      "impl": "`src/vt/widget.rs`:\n```rust\npub struct PtyPaneWidget<'a> {\n    pub terminal: &'a Terminal,\n    pub scroll_offset: usize,    // 0 = live, 大きいほど過去\n    pub selection: Option<&'a Selection>,\n    pub focused: bool,\n}\nimpl Widget for PtyPaneWidget<'_> {\n    fn render(self, area: Rect, buf: &mut ratatui::buffer::Buffer) {\n        // 1. to_visual_rows で全 VisualRow 生成\n        // 2. scroll_offset 分末尾から戻り、area.height 行ぶん切り出し\n        // 3. 各 VisualRow を area の Y に書く: cell ごとに Buffer のセルへ ch + Style 反映\n        // 4. selection が当たるセルは fg/bg 反転\n        // 5. focused かつ scroll_offset == 0 なら cursor 描画 (ratatui 側の cursor API は ui.rs で集中管理)\n    }\n}\n```\nまずは選択描画とハイパーリンク無視で OK (D3 / F3 で拡張)。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "D2",
+      "gate": "D",
+      "title": "Color/CellAttrs → ratatui::Style 変換",
+      "description": "自前 Color と CellAttrs から ratatui::Style を作るユーティリティ",
+      "tdd": true,
+      "dependencies": ["D1"],
+      "affectedFiles": [
+        { "path": "src/vt/widget.rs", "operation": "modify", "summary": "to_ratatui_style" }
+      ],
+      "impl": "`fn to_ratatui_style(fg: Color, bg: Color, attrs: CellAttrs) -> ratatui::style::Style`:\n- Color::Default → ratatui::Color::Reset\n- Color::Indexed(0..16) → 標準 ANSI 色\n- Color::Indexed(16..256) → ratatui::Color::Indexed(n)\n- Color::Rgb(r,g,b) → ratatui::Color::Rgb(r,g,b)\n- attrs から Modifier::BOLD / ITALIC / UNDERLINED / REVERSED / DIM / CROSSED_OUT を組み立て\n\nテスト:\n- 各色変換が正しい\n- 複数属性合成",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "D3",
+      "gate": "D",
+      "title": "ui.rs を PtyPaneWidget 経由に切替",
+      "description": "現状の vt100 直接アクセスを PtyPaneWidget 呼び出しに置換",
+      "tdd": false,
+      "dependencies": ["D2"],
+      "affectedFiles": [
+        { "path": "src/ui.rs", "operation": "modify", "summary": "セル描画を Widget 化" }
+      ],
+      "impl": "`src/ui.rs` の各ペイン描画箇所で、現在 `pane.parser.lock()` 経由で `screen()` を取得しセル走査している部分を:\n```rust\nlet widget = PtyPaneWidget {\n    terminal: pane.terminal_lock(),\n    scroll_offset: pane.scroll_offset(),\n    selection: pane.selection(),\n    focused: focused,\n};\nwidget.render(inner_area, frame.buffer_mut());\n```\nに置換。スクロールバー描画は別途 `pane.scrollbar_info()` を新 API 経由で取得。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "D4",
+      "gate": "D",
+      "title": "pane.rs: vt::Terminal 保持に置換",
+      "description": "Pane の parser フィールドを vt::Terminal に置換、ロック型を保つ",
+      "tdd": false,
+      "dependencies": ["D3"],
+      "affectedFiles": [
+        { "path": "src/pane.rs", "operation": "modify", "summary": "Terminal 統合" }
+      ],
+      "impl": "`Pane::parser: Arc<Mutex<vt100::Parser>>` を `Arc<Mutex<vt::Terminal>>` に置換。\n- new() で `vt::Terminal::new(rows, cols, scrollback_max)` を渡す (scrollback_max は config から)\n- pty_reader_thread 内 `parser.process(data)` は同じシグネチャでそのまま動く\n- TerminalEvent (TitleChanged/CwdChanged/Bell) を `drain_events()` で取り出して既存の AppEvent に橋渡し\n- 既存の `extract_osc7` / `extract_osc_title` は削除 (vt::osc に集約)\n- `scroll_up/scroll_down/scrollbar_info/is_scrolled_back/scroll_reset` は Pane 側に scroll_offset (usize) フィールドを持ち、Terminal は触らずに Pane の状態として管理する。なぜなら scrollback の表示オフセットは UI 状態であって VT 状態ではないため。\n  ```rust\n  pub struct Pane { ..., scroll_offset: usize }\n  pub fn scroll_up(&mut self, n: usize) {\n      let max = self.terminal.lock().unwrap().scrollback_len();\n      self.scroll_offset = (self.scroll_offset + n).min(max);\n  }\n  pub fn scrollbar_info(&self) -> (usize, usize) {\n      let total = self.terminal.lock().unwrap().scrollback_len() + self.terminal.rows();\n      (self.scroll_offset, total)\n  }\n  ```",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "D5",
+      "gate": "D",
+      "title": "[SIMPLE] claude_monitor のタイトル取得経路を新 API に",
+      "description": "OSC 0/2 でタイトルを取得する既存ロジックを vt::Terminal::title() 参照に変更",
+      "tdd": false,
+      "dependencies": ["D4"],
+      "affectedFiles": [
+        { "path": "src/claude_monitor.rs", "operation": "modify", "summary": "title 参照経路" },
+        { "path": "src/pane.rs", "operation": "modify", "summary": "title getter 追加" }
+      ],
+      "impl": "Pane に `pub fn title(&self) -> String { self.terminal.lock().unwrap().grid.title.clone() }` を追加し、claude_monitor 側から呼び出す。既存の `Arc<Mutex<String>>` ベースの title 経路は削除可能。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "E1",
+      "gate": "E",
+      "title": "[TDD] Selection モデル + テキスト抽出",
+      "description": "選択範囲の状態機械と論理座標→テキスト変換",
+      "tdd": true,
+      "dependencies": ["D5"],
+      "affectedFiles": [
+        { "path": "src/vt/selection.rs", "operation": "create", "summary": "Selection" }
+      ],
+      "impl": "`src/vt/selection.rs`:\n- `Selection { anchor: LogicalPos, head: LogicalPos, kind: SelectionKind }`\n- `LogicalPos { line: usize, col: usize }` (line は scrollback+visible 通しのインデックス)\n- `SelectionKind { Linear, Word, Line, Rectangle }` (Rectangle は将来対応)\n- `Selection::start_linear(pos)`, `extend(pos)`, `expand_word(grid, pos)`, `expand_line(grid, pos)`\n- `Selection::contains(&self, pos: LogicalPos) -> bool` 描画時のセル判定用\n- `Selection::extract_text(&self, scrollback: &Scrollback, visible: &[LogicalLine]) -> String` 範囲内のテキストを取得 (行末の余白セルはトリム、改行を挿入)\n\nテスト:\n- start + extend で範囲が伸びる\n- contains の境界条件 (anchor 自身を含む、head 自身を含む)\n- extract_text が複数行をまたぐ\n- CJK 文字を含む選択でテキストが正しい (continuation セルを 2 重カウントしない)",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "E2",
+      "gate": "E",
+      "title": "[TDD] スクリーン座標 → 論理座標 変換",
+      "description": "マウス位置 (col, row) を VisualRow を経由して LogicalPos に変換",
+      "tdd": true,
+      "dependencies": ["E1"],
+      "affectedFiles": [
+        { "path": "src/vt/reflow.rs", "operation": "modify", "summary": "screen_to_logical 追加" }
+      ],
+      "impl": "`pub fn screen_to_logical(visual_rows: &[VisualRow], screen_row: u16, screen_col: u16, scroll_offset: usize, area_height: u16) -> Option<LogicalPos>`:\n1. visual_rows.len() - area_height - scroll_offset を起点に screen_row 行目を取り出す\n2. その VisualRow の line_index と start_col + screen_col を返す (CJK 境界調整あり)\n\nテスト:\n- area_height=10, scroll_offset=0 で screen_row=3 → 末尾から 7 番目の VisualRow が見える\n- scroll_offset=5 で同じ screen_row → 5 行ぶん前の VisualRow を指す\n- screen_col が CJK continuation に当たった場合、論理座標は本セル col に丸める",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "E3",
+      "gate": "E",
+      "title": "app.rs: マウスダウン/ドラッグ/アップで Selection 更新",
+      "description": "PTY パススルー条件と選択モデルを統合",
+      "tdd": false,
+      "dependencies": ["E2"],
+      "affectedFiles": [
+        { "path": "src/app.rs", "operation": "modify", "summary": "マウスイベント処理刷新" }
+      ],
+      "impl": "`handle_mouse_event` の Down/Drag/Up 分岐を以下のロジックで:\n1. PTY パススルー条件: `pane.scroll_offset == 0 && pane.terminal.lock().grid.modes.mouse_button` (or motion)\n   - 該当時: SGR (1006) 形式でエンコードして `pane.write_input` に送信して return\n2. 非該当時: ccmux 選択モデル\n   - Down: pane.selection = Some(Selection::start_linear(pos)); pane.last_click_time/count を記録 (ダブル/トリプルクリック検出)\n   - Drag: pane.selection.extend(pos)\n   - Up: 選択確定 (テキスト抽出は実コピー時)\n3. ダブルクリックなら expand_word、トリプルなら expand_line\n4. 既存の border drag や file_tree クリックなど他の処理は維持\n\nSGR エンコード: `ESC[<button;col;rowM` (Down) / `ESC[<button;col;rowm` (Up)。button = 0/1/2 + modifiers (4=Shift,8=Meta,16=Ctrl) + scroll(64+). Drag は 32 を加算。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "E4",
+      "gate": "E",
+      "title": "Ctrl+C / 自動コピーで arboard 経由クリップボード書き込み",
+      "description": "選択確定後の Ctrl+C と select-on-release の挙動",
+      "tdd": false,
+      "dependencies": ["E3"],
+      "affectedFiles": [
+        { "path": "src/app.rs", "operation": "modify", "summary": "コピー処理" },
+        { "path": "src/vt/mod.rs", "operation": "modify", "summary": "clipboard helper 公開" }
+      ],
+      "impl": "`fn copy_selection(&self) -> Result<()>`:\n- pane.selection が None なら no-op\n- terminal を lock し extract_text\n- arboard::Clipboard::new()?.set_text(text)? (Wayland/X11/macOS/Windows 自動判定)\n- 失敗時は debug_log に warning、UI ステータスは変えない\n\n選択中のキー入力:\n- Ctrl+C: PTY に SIGINT を送るのが既存挙動。**選択範囲がある時のみ** copy_selection し、選択クリア。SIGINT は送らない (Alacritty 流)。pane.selection = None にすれば次の Ctrl+C は SIGINT に戻る\n- Esc: 選択クリア",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "E5",
+      "gate": "E",
+      "title": "ホイール/キースクロールを新 scroll_offset へ統合",
+      "description": "既存 app.rs:1478- (ScrollUp/ScrollDown) を新 API に再配線",
+      "tdd": false,
+      "dependencies": ["E4"],
+      "affectedFiles": [
+        { "path": "src/app.rs", "operation": "modify", "summary": "ScrollUp/Down 処理" }
+      ],
+      "impl": "`MouseEventKind::ScrollUp/ScrollDown` で `pane.scroll_up(3)` / `pane.scroll_down(3)` を呼ぶ。Pane 側 (D4) で scroll_offset を更新するだけなので、本 Todo はバインディング差し替えのみ。`scroll_pane_to_click` (scrollbar drag) も同様に Pane の scroll_offset を直接更新する形に変更。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "E6",
+      "gate": "E",
+      "title": "scroll_offset > 0 の間は PTY マウスを抑制",
+      "description": "scrollback 表示中は ccmux が完全にマウスを奪う",
+      "tdd": false,
+      "dependencies": ["E5"],
+      "affectedFiles": [
+        { "path": "src/app.rs", "operation": "modify", "summary": "PTY パススルー判定" }
+      ],
+      "impl": "E3 の判定条件に既に `pane.scroll_offset == 0` を含めてあるが、E6 ではこれが正しく機能することを統合確認するスポット。視覚的フィードバックとしてスクロール中はステータスバーに「scrollback view (Esc to exit)」表示を追加。Esc キーで `pane.scroll_reset()` を呼びライブビューに戻す。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "E7",
+      "gate": "E",
+      "title": "[TDD] ダブル/トリプルクリック (Word/Line 選択)",
+      "description": "クリック間隔 + 同位置判定で選択モードを切替",
+      "tdd": true,
+      "dependencies": ["E3"],
+      "affectedFiles": [
+        { "path": "src/app.rs", "operation": "modify", "summary": "クリックカウンター" }
+      ],
+      "impl": "Pane に `last_click_time: Option<Instant>`, `last_click_pos: Option<LogicalPos>`, `click_count: u32` を持つ。Down 時に:\n- 前回 click から 500ms 以内かつ同じ pos なら click_count += 1、それ以外は 1\n- click_count == 2 → expand_word (空白以外連続文字を境界)\n- click_count == 3 → expand_line\n\n`expand_word` のテスト: \"hello world\" の 'w' をクリック → \"world\" が選択\n`expand_line` のテスト: 論理行全体が選択",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "F1",
+      "gate": "F",
+      "title": "[SIMPLE] config.rs: TOML 読み込み",
+      "description": "~/.config/ccmux/config.toml を起動時に読む",
+      "tdd": false,
+      "dependencies": ["E7"],
+      "affectedFiles": [
+        { "path": "src/config.rs", "operation": "create", "summary": "Config 構造体 + 読込" },
+        { "path": "src/main.rs", "operation": "modify", "summary": "起動時読込" }
+      ],
+      "impl": "`src/config.rs`:\n```rust\n#[derive(Deserialize, Default)]\npub struct Config {\n    #[serde(default)] pub scrollback: ScrollbackCfg,\n    #[serde(default)] pub osc52: Osc52Cfg,\n}\n#[derive(Deserialize)] pub struct ScrollbackCfg { #[serde(default = \"default_max\")] pub max_lines: usize }\nfn default_max() -> usize { 10000 }\n#[derive(Deserialize, Default)] pub struct Osc52Cfg { #[serde(default)] pub allow_read: bool }\nimpl Config {\n    pub fn load() -> Self {\n        let path = dirs::config_dir().map(|p| p.join(\"ccmux/config.toml\"));\n        match path.and_then(|p| std::fs::read_to_string(&p).ok()) {\n            Some(s) => toml::from_str(&s).unwrap_or_default(),\n            None => Self::default(),\n        }\n    }\n}\n```\nmain.rs で `let cfg = Config::load();` を実行し、App::new に渡す。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "F2",
+      "gate": "F",
+      "title": "OSC 52 write/read の応答処理",
+      "description": "ClipboardWrite イベントは無条件で arboard に書く、ClipboardReadRequested は config 次第",
+      "tdd": false,
+      "dependencies": ["F1"],
+      "affectedFiles": [
+        { "path": "src/app.rs", "operation": "modify", "summary": "TerminalEvent ハンドル" },
+        { "path": "src/pane.rs", "operation": "modify", "summary": "clipboard read 応答" }
+      ],
+      "impl": "Pane の `drain_pty_events` で TerminalEvent を取り出して処理:\n- ClipboardWrite(text) → arboard で set_text。失敗はログ\n- ClipboardReadRequested → config.osc52.allow_read=true なら arboard get_text し、`ESC]52;c;<base64>ESC\\` を PTY に書き戻す。false なら何も応答しない (PTY アプリは timeout)\n- TitleChanged / CwdChanged → 既存の AppEvent と同等経路に流す",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "F3",
+      "gate": "F",
+      "title": "OSC 8 ハイパーリンク描画 + クリック処理",
+      "description": "下線スタイル付与 + Ctrl+クリックで OS ハンドラに渡す",
+      "tdd": false,
+      "dependencies": ["F2"],
+      "affectedFiles": [
+        { "path": "src/vt/widget.rs", "operation": "modify", "summary": "hyperlink 描画" },
+        { "path": "src/app.rs", "operation": "modify", "summary": "Ctrl+クリック検出" }
+      ],
+      "impl": "Widget 内: cell.attrs.hyperlink != 0 なら ratatui Style に Modifier::UNDERLINED を追加 + 色を青系に。\n\nクリック処理:\n- Down + Ctrl 押下 + その位置のセル attrs.hyperlink != 0 なら、grid.hyperlinks.entries[idx-1] を取り出して `open` crate (新規依存追加) で open\n- `open = \"5\"` を Cargo.toml に追加。失敗は debug_log に warning",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "F4",
+      "gate": "F",
+      "title": "[SIMPLE] cursor 描画と auto-scroll-to-bottom 動作",
+      "description": "PTY 出力で scroll_offset == 0 なら末尾追従、そうでなければ位置維持",
+      "tdd": false,
+      "dependencies": ["F3"],
+      "affectedFiles": [
+        { "path": "src/app.rs", "operation": "modify", "summary": "PtyOutput 受信時" },
+        { "path": "src/ui.rs", "operation": "modify", "summary": "cursor 描画" }
+      ],
+      "impl": "PtyOutput 受信時: pane.scroll_offset > 0 ならそのまま (scrollback 視聴中はユーザー操作を尊重)。0 なら追従(何もしなくてよい、新セルが visible 末尾に書かれる)。\n\nui.rs: focused pane かつ scroll_offset == 0 の時のみ frame.set_cursor(area.x + cursor.col, area.y + cursor.row) を呼ぶ。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "F5",
+      "gate": "F",
+      "title": "ビルド通過 + warnings ゼロ確認",
+      "description": "cargo build --release / cargo clippy が警告なく通る",
+      "tdd": false,
+      "dependencies": ["F4"],
+      "affectedFiles": [],
+      "impl": "`cargo build --release` と `cargo clippy --all-targets -- -D warnings` を実行し、すべてエラー/警告なしを確認。残った警告があれば該当箇所を修正。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "G1",
+      "gate": "G",
+      "title": "スナップショットテスト基盤",
+      "description": "PTY バイト列 → Grid の textual representation を比較する仕組み",
+      "tdd": false,
+      "dependencies": ["F5"],
+      "affectedFiles": [
+        { "path": "tests/vt_snapshot_test.rs", "operation": "create", "summary": "ハーネス" },
+        { "path": "tests/snapshots/", "operation": "create", "summary": "ゴールデン格納先" }
+      ],
+      "impl": "`tests/vt_snapshot_test.rs`:\n```rust\nfn run_snapshot(input: &[u8], rows: u16, cols: u16) -> String {\n    let mut t = vt::Terminal::new(rows, cols, 1000);\n    t.process(input);\n    // visible + scrollback を行ごとに textual 化 (空白は -, 通常文字はそのまま、CJK は 'X' プレースホルダ)\n}\n#[test] fn basic_text() { ... }\n```\n各テストは `tests/snapshots/{name}.bin` の入力と `{name}.txt` の期待を読み、`insta` crate などを使わず手書き比較で十分。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "G2",
+      "gate": "G",
+      "title": "スナップショット: Claude Code 模擬セッション",
+      "description": "DECSTBM + ログ流し + scrollback 保存 を再現する入力で動作確認",
+      "tdd": false,
+      "dependencies": ["G1"],
+      "affectedFiles": [
+        { "path": "tests/snapshots/claude_decstbm.bin", "operation": "create", "summary": "入力" },
+        { "path": "tests/snapshots/claude_decstbm.txt", "operation": "create", "summary": "期待" }
+      ],
+      "impl": "ESC[1;20r で scroll region を 0..19 に設定 (rows=24)、その後 30 行ぶんログを出力。確認:\n- visible は最後の 24 行ぶん (region 動作)\n- scrollback には 30-20=10 行ぶん入っていること(★本リファクタの主目的)\n- region 外の最下 4 行は触られていない",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "G3",
+      "gate": "G",
+      "title": "スナップショット: alt screen / vim 風入退出",
+      "description": "ESC[?1049h で alt 入る → 書き込み → ESC[?1049l で戻り、scrollback が保たれる",
+      "tdd": false,
+      "dependencies": ["G2"],
+      "affectedFiles": [
+        { "path": "tests/snapshots/alt_screen.bin", "operation": "create", "summary": "入力" },
+        { "path": "tests/snapshots/alt_screen.txt", "operation": "create", "summary": "期待" }
+      ],
+      "impl": "プライマリで 5 行書く → alt screen 入る → 別の 3 行書く → alt 出る → プライマリの 5 行が見え、alt 中の書き込みは scrollback に**入っていない**。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "G4",
+      "gate": "G",
+      "title": "スナップショット: CJK + auto-wrap",
+      "description": "日本語混じり文字列が CJK 境界を保って折返される",
+      "tdd": false,
+      "dependencies": ["G3"],
+      "affectedFiles": [
+        { "path": "tests/snapshots/cjk_wrap.bin", "operation": "create", "summary": "入力" },
+        { "path": "tests/snapshots/cjk_wrap.txt", "operation": "create", "summary": "期待" }
+      ],
+      "impl": "cols=10 で 'あいうえおかきくけこ' (width 20) → 1 行目 'あいうえお' (width 10)、2 行目 'かきくけこ'。CJK が境界で割れていないこと、続きセルの位置が正しいこと。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "G5",
+      "gate": "G",
+      "title": "スナップショット: SGR 色 + 属性継続",
+      "description": "色付きテキストと属性 reset が正しく反映",
+      "tdd": false,
+      "dependencies": ["G4"],
+      "affectedFiles": [
+        { "path": "tests/snapshots/sgr_colors.bin", "operation": "create", "summary": "入力" },
+        { "path": "tests/snapshots/sgr_colors.txt", "operation": "create", "summary": "期待" }
+      ],
+      "impl": "ESC[31m'red'ESC[0m'plain'ESC[1;38;2;0;255;0m'green-bold' で各セルの fg/attrs が期待通り (snapshot 形式に色情報も textual 化する)。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "G6",
+      "gate": "G",
+      "title": "実機手動チェックリスト作成",
+      "description": "リリース前の通し確認項目を tests/manual-checklist.md に整備",
+      "tdd": false,
+      "dependencies": ["G5"],
+      "affectedFiles": [
+        { "path": "tests/manual-checklist.md", "operation": "create", "summary": "手動チェック項目" }
+      ],
+      "impl": "以下を含むチェックリストを作成:\n- [ ] Claude Code 起動 → ログ流し → ホイールで scrollback 遡行できる ★主目的\n- [ ] vim 起動 → 退出 → vim 中の表示は scrollback に入らない\n- [ ] less でファイル → 退出 → 同上\n- [ ] htop 起動 → CPU バー描画\n- [ ] 日本語 ls 出力 → カーソル位置が文字境界に整合\n- [ ] マウスドラッグで scrollback 内テキストを選択 → Ctrl+C で OS クリップボードにコピー\n- [ ] ダブルクリックで単語選択\n- [ ] トリプルクリックで行選択\n- [ ] OSC 8 のハイパーリンクを Ctrl+クリックでブラウザ起動\n- [ ] tmux on ccmux で動作\n- [ ] ペイン分割中もそれぞれの scrollback が独立\n- [ ] ターミナルウィンドウリサイズ → cols 変更後も scrollback 内容が保持されている (reflow 視覚確認)\n- [ ] 設定 ~/.config/ccmux/config.toml で max_lines を 50000 に → 反映確認",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "G7",
+      "gate": "G",
+      "title": "実機手動通しテスト 1 回目",
+      "description": "G6 のチェックリストを通す。NG 項目が出たら該当 Gate に戻り修正",
+      "tdd": false,
+      "dependencies": ["G6"],
+      "affectedFiles": [],
+      "impl": "G6 のチェックリストに沿って実機で確認。NG 項目を Issue / Todo として列挙し、該当 Gate (B/C/D/E/F のどれか) に戻って修正。修正後は再度通し。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "H1",
+      "gate": "H",
+      "title": "[SIMPLE] vt100 依存の最終削除確認",
+      "description": "Cargo.lock / src 双方から vt100 が消えていることを grep",
+      "tdd": false,
+      "dependencies": ["G7"],
+      "affectedFiles": [
+        { "path": "Cargo.lock", "operation": "modify", "summary": "vt100 行が消える" }
+      ],
+      "impl": "`grep -r vt100 src/ Cargo.toml Cargo.lock` で残り 0 件を確認。残っていれば該当箇所を削除し再ビルド。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "H2",
+      "gate": "H",
+      "title": "[SIMPLE] CLAUDE.md と cjk-cursor-bug-report 追記",
+      "description": "ドキュメントを新アーキテクチャに合わせて更新",
+      "tdd": false,
+      "dependencies": ["H1"],
+      "affectedFiles": [
+        { "path": "CLAUDE.md", "operation": "modify", "summary": "vt100 言及を vt モジュールに" },
+        { "path": "docs/cjk-cursor-bug-report.md", "operation": "modify", "summary": "末尾に恒久対応追記" }
+      ],
+      "impl": "CLAUDE.md の `## Tech Stack` と `## Key Design Decisions` から vt100 言及を取り、自前 vt モジュール (vte ベース) に置換。docs/cjk-cursor-bug-report.md の末尾に「2026-04 リファクタにより自前グリッドへ移行、CJK 幅は unicode-width で恒久処理化」と追記。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    },
+    {
+      "id": "H3",
+      "gate": "H",
+      "title": "[SIMPLE] バージョン bump とリリースノート下書き",
+      "description": "Cargo.toml と npm/package.json を同じバージョンへ。CHANGELOG 風のメモを残す",
+      "tdd": false,
+      "dependencies": ["H2"],
+      "affectedFiles": [
+        { "path": "Cargo.toml", "operation": "modify", "summary": "version bump" },
+        { "path": "npm/package.json", "operation": "modify", "summary": "version bump" }
+      ],
+      "impl": "現バージョンを minor bump (互換性ある拡張だが内部実装の根幹変更のため、安全側で minor)。npm/package.json も同じ値に揃える。コミットメッセージで主要変更点を箇条書き。実際の `git tag` と push は本仕様書の範囲外 (CLAUDE.md の Release Process に従って人手で行う)。",
+      "relatedIssues": [],
+      "steps": [
+        { "kind": "impl", "title": "Step 1 — IMPL", "checked": false },
+        { "kind": "review", "title": "Step 2 — Review", "checked": false, "review": null }
+      ]
+    }
+  ],
+  "metadata": {
+    "createdAt": "2026-04-25T00:00:00Z",
+    "totalGates": 8,
+    "totalTodos": 38
+  }
+}
