@@ -49,23 +49,21 @@ struct Performer<'a> {
 }
 
 impl Performer<'_> {
-    /// Wrap to the next line. Marks the current line as `continued`. If the
-    /// cursor is at the bottom of the (default) scroll region, scrolls one
-    /// line, saving to scrollback when the xterm rule allows.
+    /// Wrap to the next line. Marks the *destination* line as `continued`
+    /// (per `LogicalLine` semantics: a line flags itself as continuing from
+    /// the previous logical line). Scrolls when at the bottom of the region.
     fn wrap_to_next_line(&mut self) {
-        let row = self.grid.cursor.row;
-        {
-            let buf = self.grid.current_buffer_mut();
-            if let Some(line) = buf.visible.get_mut(row as usize) {
-                line.continued = true;
-            }
-        }
         if self.grid.cursor.row >= self.grid.scroll_bottom {
             self.grid.scroll_up_in_region(1);
         } else {
             self.grid.cursor.row += 1;
         }
         self.grid.cursor.col = 0;
+        let row = self.grid.cursor.row as usize;
+        let buf = self.grid.current_buffer_mut();
+        if let Some(line) = buf.visible.get_mut(row) {
+            line.continued = true;
+        }
     }
 
     /// LF / VT / FF: advance row; scroll if at the bottom of the scroll region.
@@ -274,7 +272,8 @@ mod tests {
         assert_eq!(t.grid.primary.visible[1].cells[0].ch, 'F');
         assert_eq!(t.grid.cursor.row, 1);
         assert_eq!(t.grid.cursor.col, 1);
-        assert!(t.grid.primary.visible[0].continued);
+        assert!(t.grid.primary.visible[1].continued);
+        assert!(!t.grid.primary.visible[0].continued);
     }
 
     #[test]
