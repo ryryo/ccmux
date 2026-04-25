@@ -2,6 +2,7 @@ mod app;
 mod claude_monitor;
 mod debug_log;
 mod filetree;
+mod mouse_encode;
 mod pane;
 mod preview;
 mod ui;

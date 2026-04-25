@@ -229,6 +229,23 @@ impl Pane {
         term.grid.modes.bracketed_paste
     }
 
+    /// Returns true when the PTY app has enabled mouse reporting
+    /// (button or motion). Used to decide whether to forward raw mouse
+    /// events to the PTY (E3).
+    pub fn is_mouse_reporting_enabled(&self) -> bool {
+        let term = self.terminal.lock().unwrap_or_else(|e| e.into_inner());
+        term.grid.modes.mouse_button || term.grid.modes.mouse_motion || term.grid.modes.mouse_x10
+    }
+
+    /// Whether the PTY app has requested SGR-encoded (1006) mouse
+    /// reporting. ccmux only forwards mouse events when the app has
+    /// negotiated SGR — sending SGR to an X10/legacy app would emit
+    /// unparseable bytes.
+    pub fn is_mouse_sgr_enabled(&self) -> bool {
+        let term = self.terminal.lock().unwrap_or_else(|e| e.into_inner());
+        term.grid.modes.mouse_sgr_encoding
+    }
+
     /// Current window title (set by OSC 0/2). Empty when none was sent.
     #[allow(dead_code)]
     pub fn title(&self) -> String {

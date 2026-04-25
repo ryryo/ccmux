@@ -1,6 +1,7 @@
 use super::cell::Cell;
 use super::line::LogicalLine;
 use super::scrollback::Scrollback;
+use super::selection::LogicalPos;
 
 /// A single visual (screen) row produced by chunking a logical line at `cols`.
 /// `line_index` is sequential across scrollback then visible.
@@ -9,7 +10,12 @@ use super::scrollback::Scrollback;
 #[derive(Debug, Clone, Copy)]
 pub struct VisualRow<'a> {
     pub line_index: usize,
+    /// Cumulative visual-width offset within the logical line (used for
+    /// cursor placement and visual-column math).
     pub start_col: usize,
+    /// Cumulative cell-index offset within the logical line (used for
+    /// selection logical-position math, which addresses cells).
+    pub start_cell_idx: usize,
     pub cells: &'a [Cell],
 }
 
@@ -38,6 +44,7 @@ fn push_chunks<'a>(
         out.push(VisualRow {
             line_index,
             start_col: 0,
+            start_cell_idx: 0,
             cells: &[],
         });
         return;
@@ -52,6 +59,7 @@ fn push_chunks<'a>(
             out.push(VisualRow {
                 line_index,
                 start_col,
+                start_cell_idx: start,
                 cells: &line.cells[start..i],
             });
             start = i;
@@ -65,8 +73,63 @@ fn push_chunks<'a>(
     out.push(VisualRow {
         line_index,
         start_col,
+        start_cell_idx: start,
         cells: &line.cells[start..],
     });
+}
+
+/// Map a screen-relative (row, col) — where `screen_row` 0 is the top of
+/// the visible viewport — to a `LogicalPos` referencing
+/// `scrollback.iter().chain(visible)`. `area_height` is the number of
+/// terminal rows currently rendered; `scroll_offset` is how many rows
+/// the user has scrolled UP into history (0 = live tail).
+///
+/// Returns `None` if the pointer falls above the topmost visual row
+/// or in an empty area below the last logical line.
+///
+/// Continuation cells (CJK width=0) are snapped to their owning main cell
+/// so the returned `col` always references a printable cell.
+pub fn screen_to_logical(
+    visual_rows: &[VisualRow],
+    screen_row: u16,
+    screen_col: u16,
+    scroll_offset: usize,
+    area_height: u16,
+) -> Option<LogicalPos> {
+    let total = visual_rows.len();
+    if total == 0 || area_height == 0 {
+        return None;
+    }
+    let bottom = total.saturating_sub(scroll_offset);
+    let top = bottom.saturating_sub(area_height as usize);
+    let target = top + screen_row as usize;
+    if target >= bottom {
+        return None;
+    }
+    let row = visual_rows[target];
+    // Walk cells accumulating visual width until we hit screen_col.
+    let mut acc = 0usize;
+    let mut last_main: usize = 0;
+    for (i, cell) in row.cells.iter().enumerate() {
+        if cell.width > 0 {
+            last_main = i;
+        }
+        let cw = cell.width as usize;
+        if acc + cw > screen_col as usize {
+            // Snap continuation cells back to the main cell.
+            let cell_idx = if cell.width == 0 { last_main } else { i };
+            return Some(LogicalPos {
+                line: row.line_index,
+                col: row.start_cell_idx + cell_idx,
+            });
+        }
+        acc += cw;
+    }
+    // Past the last printable cell — clamp to end-of-row.
+    Some(LogicalPos {
+        line: row.line_index,
+        col: row.start_cell_idx + row.cells.len(),
+    })
 }
 
 #[cfg(test)]
@@ -159,6 +222,49 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].cells.len(), 0);
     }
+
+    #[test]
+    fn screen_to_logical_live_tail() {
+        let visible = vec![ascii("a"), ascii("b"), ascii("c"), ascii("d")];
+        let sb = Scrollback::new(0);
+        let rows = to_visual_rows(&sb, &visible, 10);
+        // area_height=4 viewport, scroll_offset=0 → top=0, bottom=4
+        let pos = screen_to_logical(&rows, 0, 0, 0, 4).unwrap();
+        assert_eq!(pos.line, 0);
+        let pos = screen_to_logical(&rows, 3, 0, 0, 4).unwrap();
+        assert_eq!(pos.line, 3);
+    }
+
+    #[test]
+    fn screen_to_logical_scrolled_back() {
+        let mut sb = Scrollback::new(20);
+        sb.push(ascii("old0"));
+        sb.push(ascii("old1"));
+        let visible = vec![ascii("new0"), ascii("new1")];
+        let rows = to_visual_rows(&sb, &visible, 10);
+        // 4 rows total, area=2, scroll_offset=2 → see only old0/old1
+        let pos = screen_to_logical(&rows, 0, 0, 2, 2).unwrap();
+        assert_eq!(pos.line, 0);
+        let pos = screen_to_logical(&rows, 1, 0, 2, 2).unwrap();
+        assert_eq!(pos.line, 1);
+    }
+
+    #[test]
+    fn screen_to_logical_cjk_continuation_snaps() {
+        let visible = vec![cjk("あいう")];
+        let sb = Scrollback::new(0);
+        let rows = to_visual_rows(&sb, &visible, 10);
+        // screen_col=1 lands on continuation cell of い? actually col 0 is 'あ' main,
+        // col 1 is 'あ' continuation → should snap to col 0.
+        let pos = screen_to_logical(&rows, 0, 1, 0, 1).unwrap();
+        assert_eq!(pos.col, 0);
+        // col 2 is 'い' main
+        let pos = screen_to_logical(&rows, 0, 2, 0, 1).unwrap();
+        assert_eq!(pos.col, 2);
+    }
+
+    fn ascii(s: &str) -> LogicalLine { line_of_ascii(s) }
+    fn cjk(s: &str) -> LogicalLine { line_of_cjk(s) }
 
     #[test]
     fn scrollback_then_visible_indexing() {

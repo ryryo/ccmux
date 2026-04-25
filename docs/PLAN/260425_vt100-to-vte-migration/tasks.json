@@ -10,7 +10,7 @@
   "status": "in-progress",
   "reviewChecked": false,
   "progress": {
-    "completed": 46,
+    "completed": 60,
     "total": 90
   },
   "preflight": [],
@@ -961,13 +961,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 1,
+            "summary": "vt::selection module + tests; extract_text per-segment trim fix from review"
+          }
         }
       ]
     },
@@ -993,13 +997,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "screen_to_logical with CJK continuation snap; start_cell_idx added to VisualRow"
+          }
         }
       ]
     },
@@ -1025,13 +1033,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 1,
+            "summary": "SGR 1006 encoder + try_forward_mouse_to_pty; gated on is_mouse_sgr_enabled per reviewer feedback"
+          }
         }
       ]
     },
@@ -1062,13 +1074,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "Ctrl+C copies selection (wired in D4); Esc clears selection"
+          }
         }
       ]
     },
@@ -1094,13 +1110,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "Wheel scroll already routes through pane.scroll_up/down(3) since D4"
+          }
         }
       ]
     },
@@ -1126,13 +1146,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "Esc on pane clears selection or exits scrollback view; PTY mouse passthrough requires scroll_offset==0"
+          }
         }
       ]
     },
@@ -1158,13 +1182,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 1,
+            "summary": "Double/triple click expand via vt::selection::expand_word; ±1 cell jitter tolerance from review"
+          }
         }
       ]
     },

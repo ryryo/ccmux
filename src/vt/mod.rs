@@ -6,5 +6,6 @@ pub mod osc;
 pub mod parser;
 pub mod reflow;
 pub mod scrollback;
+pub mod selection;
 pub mod widget;
 pub mod width;

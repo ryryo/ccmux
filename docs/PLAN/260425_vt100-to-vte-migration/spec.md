@@ -410,20 +410,20 @@ Gate H: クリーンアップ・ドキュメント（Gate G 完了後）
 
 > マウスパススルー・選択範囲モデル・コピー・スクロール統合
 
-- [ ] **E1**: [TDD] Selection モデル + テキスト抽出
-  > **Review E1**: _未記入_
-- [ ] **E2**: [TDD] スクリーン座標 → 論理座標 変換
-  > **Review E2**: _未記入_
-- [ ] **E3**: app.rs: マウスダウン/ドラッグ/アップで Selection 更新
-  > **Review E3**: _未記入_
-- [ ] **E4**: Ctrl+C / 自動コピーで arboard 経由クリップボード書き込み
-  > **Review E4**: _未記入_
-- [ ] **E5**: ホイール/キースクロールを新 scroll_offset へ統合
-  > **Review E5**: _未記入_
-- [ ] **E6**: scroll_offset > 0 の間は PTY マウスを抑制
-  > **Review E6**: _未記入_
-- [ ] **E7**: [TDD] ダブル/トリプルクリック (Word/Line 選択)
-  > **Review E7**: _未記入_
+- [x] **E1**: [TDD] Selection モデル + テキスト抽出
+  > **Review E1**: ✅ PASSED (FIX 1回) — vt::selection module + tests; extract_text per-segment trim fix from review
+- [x] **E2**: [TDD] スクリーン座標 → 論理座標 変換
+  > **Review E2**: ✅ PASSED — screen_to_logical with CJK continuation snap; start_cell_idx added to VisualRow
+- [x] **E3**: app.rs: マウスダウン/ドラッグ/アップで Selection 更新
+  > **Review E3**: ✅ PASSED (FIX 1回) — SGR 1006 encoder + try_forward_mouse_to_pty; gated on is_mouse_sgr_enabled per reviewer feedback
+- [x] **E4**: Ctrl+C / 自動コピーで arboard 経由クリップボード書き込み
+  > **Review E4**: ✅ PASSED — Ctrl+C copies selection (wired in D4); Esc clears selection
+- [x] **E5**: ホイール/キースクロールを新 scroll_offset へ統合
+  > **Review E5**: ✅ PASSED — Wheel scroll already routes through pane.scroll_up/down(3) since D4
+- [x] **E6**: scroll_offset > 0 の間は PTY マウスを抑制
+  > **Review E6**: ✅ PASSED — Esc on pane clears selection or exits scrollback view; PTY mouse passthrough requires scroll_offset==0
+- [x] **E7**: [TDD] ダブル/トリプルクリック (Word/Line 選択)
+  > **Review E7**: ✅ PASSED (FIX 1回) — Double/triple click expand via vt::selection::expand_word; ±1 cell jitter tolerance from review
 
 **Gate E 通過条件**: 全 Review 結果記入欄が埋まり、総合判定が PASS であること
 

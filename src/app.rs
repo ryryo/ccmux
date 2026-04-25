@@ -381,6 +381,11 @@ pub struct App {
     last_tab_click: Option<(usize, Instant)>,
     // Text selection
     pub selection: Option<TextSelection>,
+    /// Last left-click on a pane content area (pane_id, row, col, instant).
+    /// Used to detect double/triple click for word/line expansion (E7).
+    last_pane_click: Option<(usize, u16, u16, Instant)>,
+    /// Click count within the multi-click window (1, 2, or 3).
+    pane_click_count: u32,
     // Version check (background)
     pub version_info: crate::version_check::VersionInfo,
     // Claude Code JSONL monitoring
@@ -425,6 +430,8 @@ impl App {
             rename_input: None,
             last_tab_click: None,
             selection: None,
+            last_pane_click: None,
+            pane_click_count: 0,
             version_info: {
                 let info = crate::version_check::VersionInfo::new();
                 crate::version_check::spawn_check(info.clone());
@@ -579,6 +586,30 @@ impl App {
                 self.mark_layout_change();
             }
             return Ok(true);
+        }
+
+        // E6: Esc on a focused pane — if a selection is live or the
+        // pane is scrolled back, clear those local UI states and
+        // swallow the key. Otherwise let Esc propagate to the PTY.
+        if key.code == KeyCode::Esc && key.modifiers == KeyModifiers::NONE
+            && self.ws().focus_target == FocusTarget::Pane
+        {
+            let mut handled = false;
+            if self.selection.is_some() {
+                self.selection = None;
+                handled = true;
+            }
+            let focused_id = self.ws().focused_pane_id;
+            if let Some(pane) = self.ws().panes.get(&focused_id) {
+                if pane.is_scrolled_back() {
+                    pane.scroll_reset();
+                    handled = true;
+                }
+            }
+            if handled {
+                self.dirty = true;
+                return Ok(true);
+            }
         }
 
         // Ctrl+C — if text is selected, copy to clipboard instead of sending SIGINT
@@ -1133,6 +1164,53 @@ impl App {
         }
     }
 
+    /// Try to forward a mouse event to the focused pane's PTY using
+    /// SGR (1006) encoding. Returns true if forwarded — caller should
+    /// then short-circuit.
+    fn try_forward_mouse_to_pty(&mut self, mouse: &MouseEvent) -> bool {
+        let col = mouse.column;
+        let row = mouse.row;
+        let pane_rects = self.ws().last_pane_rects.clone();
+        let focused_id = self.ws().focused_pane_id;
+        let Some((_, rect)) = pane_rects
+            .into_iter()
+            .find(|(id, _)| *id == focused_id)
+        else {
+            return false;
+        };
+        // Inside content area only (exclude borders + scrollbar column).
+        let inner = Rect::new(
+            rect.x + 1,
+            rect.y + 1,
+            rect.width.saturating_sub(3),
+            rect.height.saturating_sub(2),
+        );
+        if col < inner.x || col >= inner.x + inner.width
+            || row < inner.y || row >= inner.y + inner.height
+        {
+            return false;
+        }
+        let Some(pane) = self.ws_mut().panes.get_mut(&focused_id) else { return false };
+        if pane.is_scrolled_back() || !pane.is_mouse_reporting_enabled() || !pane.is_mouse_sgr_enabled() {
+            return false;
+        }
+        let cell_col = col - inner.x + 1;
+        let cell_row = row - inner.y + 1;
+        let mods: u8 = {
+            let m = mouse.modifiers;
+            let mut bits = 0u8;
+            if m.contains(KeyModifiers::SHIFT)   { bits |= 4; }
+            if m.contains(KeyModifiers::ALT)     { bits |= 8; }
+            if m.contains(KeyModifiers::CONTROL) { bits |= 16; }
+            bits
+        };
+        if let Some(bytes) = crate::mouse_encode::encode_sgr(mouse.kind, cell_col, cell_row, mods) {
+            let _ = pane.write_input(&bytes);
+            return true;
+        }
+        false
+    }
+
     pub fn handle_mouse_event(&mut self, mouse: MouseEvent) {
         // Cancel any in-progress rename on mouse click so
         // the buffer can't silently migrate to another tab.
@@ -1141,6 +1219,20 @@ impl App {
             self.rename_input = None;
             self.dirty = true;
             if needs_relayout { self.mark_layout_change(); }
+        }
+
+        // E3/E6: PTY mouse passthrough. When the focused pane's PTY
+        // has enabled mouse reporting AND we're on the live tail
+        // (scroll_offset == 0), forward raw mouse events instead of
+        // running the local selection / scrollbar logic.
+        if matches!(
+            mouse.kind,
+            MouseEventKind::Down(_) | MouseEventKind::Up(_) | MouseEventKind::Drag(_)
+                | MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        ) {
+            if self.try_forward_mouse_to_pty(&mouse) {
+                return;
+            }
         }
 
         match mouse.kind {
@@ -1275,6 +1367,52 @@ impl App {
                             let inner = Rect::new(rect.x + 1, rect.y + 1, rect.width.saturating_sub(2), rect.height.saturating_sub(2));
                             self.scroll_pane_to_click(pane_id, row, &inner);
                             self.dragging = Some(DragTarget::Scrollbar(pane_id, inner));
+                            return;
+                        }
+
+                        // E7: detect double/triple click on the pane
+                        // content area, then expand the selection to
+                        // the surrounding word or whole line.
+                        let now = Instant::now();
+                        let same_spot = matches!(
+                            self.last_pane_click,
+                            Some((pid, r, c, t))
+                                if pid == pane_id
+                                    && r.abs_diff(row) <= 1 && c.abs_diff(col) <= 1
+                                    && now.duration_since(t).as_millis() < 500
+                        );
+                        if same_spot {
+                            self.pane_click_count = (self.pane_click_count + 1).min(3);
+                        } else {
+                            self.pane_click_count = 1;
+                        }
+                        self.last_pane_click = Some((pane_id, row, col, now));
+
+                        if self.pane_click_count >= 2 {
+                            let inner = Rect::new(
+                                rect.x + 1, rect.y + 1,
+                                rect.width.saturating_sub(2),
+                                rect.height.saturating_sub(2),
+                            );
+                            let cell_col = col.saturating_sub(inner.x) as u32;
+                            let cell_row = row.saturating_sub(inner.y) as u32;
+                            let line_select = self.pane_click_count >= 3;
+                            if let Some(pane) = self.ws().panes.get(&pane_id) {
+                                let (start_col, end_col) = if line_select {
+                                    (0u32, inner.width.saturating_sub(1) as u32)
+                                } else {
+                                    pane_word_bounds(pane, cell_row, cell_col)
+                                        .unwrap_or((cell_col, cell_col))
+                                };
+                                self.selection = Some(TextSelection {
+                                    target: SelectionTarget::Pane(pane_id),
+                                    start_row: cell_row,
+                                    start_col,
+                                    end_row: cell_row,
+                                    end_col,
+                                    content_rect: inner,
+                                });
+                            }
                         }
                         return;
                     }
@@ -1681,6 +1819,33 @@ fn dir_name(path: &std::path::Path) -> String {
 
 /// Extract text from a pane's visible screen within a selection range.
 /// Coordinates are screen-relative (row 0 = top of visible area).
+/// Word boundaries (start_col, end_col) for a screen-row click. Routes
+/// through `vt::selection::Selection::expand_word` so logic stays in one
+/// place. Returns None if the click is on whitespace.
+fn pane_word_bounds(pane: &Pane, screen_row: u32, screen_col: u32) -> Option<(u32, u32)> {
+    use crate::vt::selection::{LogicalPos, Selection};
+    let term = pane.terminal.lock().unwrap_or_else(|e| e.into_inner());
+    let buf = term.grid.current_buffer();
+    let line_idx = screen_row as usize;
+    let line = buf.visible.get(line_idx)?;
+    if line.cells.is_empty() { return None; }
+    // Snap CJK continuation cell to its main cell.
+    let mut idx = (screen_col as usize).min(line.cells.len() - 1);
+    while idx > 0 && line.cells[idx].width == 0 {
+        idx -= 1;
+    }
+    let is_word = |c: char| !c.is_whitespace() && c != '\0';
+    if !is_word(line.cells[idx].ch) { return None; }
+    let pos = LogicalPos {
+        line: buf.scrollback.len() + line_idx,
+        col: idx,
+    };
+    let mut sel = Selection::start_linear(pos);
+    sel.expand_word(&buf.scrollback, &buf.visible, pos);
+    let (s, e) = sel.range();
+    Some((s.col as u32, e.col as u32))
+}
+
 fn extract_selected_text(pane: &Pane, sr: u32, sc: u32, er: u32, ec: u32) -> String {
     let term = pane.terminal.lock().unwrap_or_else(|e| e.into_inner());
     let buf = term.grid.current_buffer();
