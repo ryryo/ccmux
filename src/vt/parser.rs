@@ -230,20 +230,29 @@ impl Perform for Performer<'_> {
                     let _ = writeln!(
                         f,
                         "CSI m intermediates={intermediates:?} params={pretty:?} underline_before={}",
-                        self.grid.cursor.style.contains(super::cell::CellAttrs::UNDERLINE)
+                        self.grid.cursor.style.contains(crate::vt::cell::CellAttrs::UNDERLINE)
                     );
                 }
             }
         }
-        if intermediates.first() == Some(&b'?') {
-            match action {
+        // CSI with non-empty intermediates is a private / xterm-extension
+        // sequence (ECMA-48 §5.4). It is NOT plain SGR even when the final
+        // byte is 'm'. Claude Code emits `\e[>4;2m` (xterm modifyOtherKeys
+        // mode 2 set) at startup; routing it through `handle_sgr` previously
+        // mis-set UNDERLINE + DIM on the cursor pen, making every subsequent
+        // cell render underlined since Claude never emits `\e[24m`/`\e[0m`.
+        match intermediates.first() {
+            Some(&b'?') => match action {
                 'h' => super::csi::dispatch_private_mode(self.grid, params, true),
                 'l' => super::csi::dispatch_private_mode(self.grid, params, false),
                 _ => {}
-            }
-            return;
+            },
+            None => super::csi::dispatch(self.grid, params, action),
+            // `>`, `!`, ` `, `'`, `$`, etc. — recognised CSI intermediates we
+            // don't yet implement. Drop them silently rather than fall back
+            // to standard CSI handling.
+            Some(_) => {}
         }
-        super::csi::dispatch(self.grid, params, action);
         if action == 'm' {
             if let Some(path) = std::env::var_os("CCMUX_TRACE_CSI") {
                 use std::io::Write;
@@ -251,7 +260,7 @@ impl Perform for Performer<'_> {
                     let _ = writeln!(
                         f,
                         "  → underline_after={} bits={:#06x} fg={:?} bg={:?}",
-                        self.grid.cursor.style.contains(super::cell::CellAttrs::UNDERLINE),
+                        self.grid.cursor.style.contains(crate::vt::cell::CellAttrs::UNDERLINE),
                         self.grid.cursor.style.bits,
                         self.grid.cursor.fg,
                         self.grid.cursor.bg,
@@ -556,5 +565,51 @@ mod tests {
         t.process("a\u{0301}".as_bytes());
         assert_eq!(t.grid.primary.visible[0].cells[0].ch, 'a');
         assert_eq!(t.grid.cursor.col, 1);
+    }
+
+    #[test]
+    fn xterm_modify_other_keys_does_not_set_sgr_attrs() {
+        // Regression for the "everything underlined" bug: Claude Code emits
+        // `\e[>4;2m` (xterm modifyOtherKeys mode 2 set) at startup, which has
+        // a `>` intermediate and is NOT plain SGR. We previously routed it
+        // through handle_sgr → set UNDERLINE (param 4) + DIM (param 2), and
+        // since Claude never emits `\e[24m` / `\e[0m` the bits stuck and
+        // every subsequent print() carried them.
+        let mut t = Terminal::new(2, 10, 100);
+        t.process(b"\x1b[>4;2m");
+        assert!(
+            !t.grid.cursor.style.contains(crate::vt::cell::CellAttrs::UNDERLINE),
+            "CSI > 4 ; 2 m must not set UNDERLINE"
+        );
+        assert!(
+            !t.grid.cursor.style.contains(crate::vt::cell::CellAttrs::DIM),
+            "CSI > 4 ; 2 m must not set DIM"
+        );
+        // Subsequent prints carry no spurious attrs.
+        t.process(b"hi");
+        let cell = &t.grid.primary.visible[0].cells[0];
+        assert_eq!(cell.attrs.bits, 0, "first cell should have no SGR bits");
+    }
+
+    #[test]
+    fn standard_sgr_4_still_sets_underline() {
+        // Make sure the intermediate gating doesn't break legitimate SGR.
+        let mut t = Terminal::new(2, 10, 100);
+        t.process(b"\x1b[4mU\x1b[24m");
+        let cell = &t.grid.primary.visible[0].cells[0];
+        assert!(
+            cell.attrs.contains(crate::vt::cell::CellAttrs::UNDERLINE),
+            "plain CSI 4 m must set UNDERLINE on subsequent cells"
+        );
+        assert!(!t.grid.cursor.style.contains(crate::vt::cell::CellAttrs::UNDERLINE));
+    }
+
+    #[test]
+    fn xterm_secondary_da_does_not_pollute_pen() {
+        // `\e[>c` queries secondary DA — must be a no-op on the cursor pen.
+        let mut t = Terminal::new(2, 10, 100);
+        t.process(b"\x1b[>c");
+        assert_eq!(t.grid.cursor.style.bits, 0);
+        assert_eq!(t.grid.cursor.fg, crate::vt::cell::Color::Default);
     }
 }
