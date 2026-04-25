@@ -1,145 +1,193 @@
 # ccmux
 
-Claude Code Multiplexer — manage multiple Claude Code instances in TUI split panes.
+Claude Code Multiplexer — TUI 分割ペインで複数の Claude Code インスタンスを管理するターミナルマルチプレクサ。
 
-A lightweight terminal multiplexer built specifically for running multiple [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions side-by-side.
+> **このリポジトリは [Shin-sibainu/ccmux](https://github.com/Shin-sibainu/ccmux) のフォーク**です。
+> フォーク元からの主な変更点は [フォーク元との差分](#フォーク元との差分) を参照してください。
 
 ![ccmux screenshot](screenshot.png)
 
-## Features
+## 機能
 
-- **Multi-pane terminal** — Split vertically/horizontally, run independent PTY shells
-- **Tab workspaces** — Multiple project tabs with click-to-switch
-- **File tree sidebar** — Browse project files with icons, expand/collapse directories
-- **Syntax-highlighted preview** — View file contents with language-aware coloring
-- **Claude Code detection** — Pane border turns orange when Claude Code is running
-- **cd tracking** — File tree and tab name auto-update when you change directories
-- **Mouse support** — Click to focus, drag borders to resize, scroll history
-- **Scrollback** — 10,000 lines of terminal history per pane
-- **Dark theme** — Claude-inspired color scheme
-- **Cross-platform** — Windows, macOS, Linux
-- **Single binary** — ~1MB, no runtime dependencies
+- **マルチペイン** — 上下・左右に分割して独立した PTY シェルを実行
+- **タブワークスペース** — 複数プロジェクトタブ、クリックで切り替え
+- **ファイルツリーサイドバー** — アイコン付きディレクトリ表示、展開/折りたたみ
+- **シンタックスハイライトプレビュー** — 言語を認識した色付きファイル内容表示
+- **Claude Code 検出** — Claude Code 起動中はペインのボーダーがオレンジに変わる
+- **cd トラッキング** — ディレクトリ移動に合わせてファイルツリーとタブ名が自動更新
+- **マウス対応** — クリックでフォーカス、ドラッグでリサイズ、スクロールで履歴遡行
+- **スクロールバック** — ペインごとに最大 10,000 行の端末履歴
+- **ダークテーマ** — Claude インスパイアのカラースキーム
+- **クロスプラットフォーム** — Windows / macOS / Linux
+- **シングルバイナリ** — 約 1MB、ランタイム依存なし
 
-## Install
+## インストール
 
-### Via npm (recommended)
+### npm（推奨）
 
 ```bash
 npm install -g ccmux-cli
 ```
 
-### Download binary
+### バイナリを直接ダウンロード
 
-Download the latest binary from [Releases](https://github.com/Shin-sibainu/ccmux/releases):
+[Releases](https://github.com/ryryo/ccmux/releases) から最新バイナリをダウンロード:
 
-| Platform | File |
+| プラットフォーム | ファイル |
 |----------|------|
 | Windows (x64) | `ccmux-windows-x64.exe` |
 | macOS (Apple Silicon) | `ccmux-macos-arm64` |
 | macOS (Intel) | `ccmux-macos-x64` |
 | Linux (x64) | `ccmux-linux-x64` |
 
-> **Windows:** Microsoft Defender SmartScreen may show a warning because the binary is not code-signed. Click "More info" → "Run anyway" to proceed. This is normal for unsigned open-source software.
+> **Windows:** バイナリがコード署名されていないため、Microsoft Defender SmartScreen の警告が表示される場合があります。「詳細情報」→「実行」で続行してください。
 
-> **macOS/Linux:** After downloading, make the binary executable: `chmod +x ccmux-*`
+> **macOS/Linux:** ダウンロード後に実行権限を付与してください: `chmod +x ccmux-*`
 
-### From source
+### ソースからビルド
 
 ```bash
-git clone https://github.com/Shin-sibainu/ccmux.git
+git clone https://github.com/ryryo/ccmux.git
 cd ccmux
 cargo build --release
-# Binary at target/release/ccmux (or ccmux.exe on Windows)
+# バイナリ: target/release/ccmux (Windows では ccmux.exe)
 ```
 
-Requires [Rust](https://rustup.rs/) toolchain.
+[Rust](https://rustup.rs/) ツールチェーンが必要です。
 
-## Usage
+## 使い方
 
 ```bash
 ccmux
 ```
 
-Launch from any directory. The file tree shows the current working directory.
+任意のディレクトリから起動するとファイルツリーにそのディレクトリが表示されます。
 
-## Keybindings
+## キーバインド
 
-### Pane mode (default)
+### ペインモード（デフォルト）
 
-| Key | Action |
+| キー | 操作 |
 |-----|--------|
-| `Ctrl+D` | Split vertically |
-| `Ctrl+E` | Split horizontally |
-| `Ctrl+W` | Close pane / tab |
-| `Alt+T` / `Ctrl+T` | New tab |
-| `Alt+1..9` | Jump to tab N |
-| `Alt+Left/Right` | Previous / next tab |
-| `Alt+R` | Rename tab (session only) |
-| `Alt+S` | Toggle status bar |
-| `Ctrl+F` | Toggle file tree |
-| `Ctrl+P` | Swap preview/terminal layout |
-| `Ctrl+Right/Left` | Cycle focus (sidebar, preview, panes) |
-| `Ctrl+Q` | Quit |
+| `Ctrl+D` | 垂直分割 |
+| `Ctrl+E` | 水平分割 |
+| `Ctrl+W` | ペイン / タブを閉じる |
+| `Alt+T` / `Ctrl+T` | 新しいタブ |
+| `Alt+1..9` | タブ N に移動 |
+| `Alt+Left/Right` | 前 / 次のタブ |
+| `Alt+R` | タブ名を変更（セッション中のみ） |
+| `Alt+S` | ステータスバーの表示切り替え |
+| `Ctrl+F` | ファイルツリーの表示切り替え |
+| `Ctrl+P` | プレビュー / ターミナルレイアウト切り替え |
+| `Ctrl+Right/Left` | フォーカス循環（サイドバー・プレビュー・ペイン） |
+| `Ctrl+Q` | 終了 |
 
-### File tree mode (after `Ctrl+F`)
+### ファイルツリーモード（`Ctrl+F` 後）
 
-| Key | Action |
+| キー | 操作 |
 |-----|--------|
-| `j` / `k` | Move selection |
-| `Enter` | Open file / expand directory |
-| `.` | Toggle hidden files |
-| `Esc` | Return to pane |
+| `j` / `k` | 選択を移動 |
+| `Enter` | ファイルを開く / ディレクトリを展開 |
+| `.` | 隠しファイルの表示切り替え |
+| `Esc` | ペインに戻る |
 
-### Preview mode (after focusing preview)
+### プレビューモード（プレビューにフォーカス後）
 
-| Key | Action |
+| キー | 操作 |
 |-----|--------|
-| `j` / `k` | Scroll vertically |
-| `h` / `l` | Scroll horizontally |
-| `Ctrl+W` | Close preview |
-| `Esc` | Return to pane |
+| `j` / `k` | 縦スクロール |
+| `h` / `l` | 横スクロール |
+| `Ctrl+W` | プレビューを閉じる |
+| `Esc` | ペインに戻る |
 
-### Mouse
+### マウス操作
 
-| Action | Effect |
+| 操作 | 効果 |
 |--------|--------|
-| Click pane | Focus pane |
-| Click tab | Switch tab |
-| Double-click tab | Rename tab |
-| Click `+` | New tab |
-| Drag border | Resize panels |
-| Scroll wheel | Scroll file tree / preview / terminal history |
+| ペインをクリック | フォーカスを移動 |
+| タブをクリック | タブを切り替え |
+| タブをダブルクリック | タブ名を変更 |
+| `+` をクリック | 新しいタブを作成 |
+| ボーダーをドラッグ | パネルをリサイズ |
+| スクロールホイール | ファイルツリー / プレビュー / 端末履歴をスクロール |
 
-## Architecture
+## フォーク元との差分
+
+このフォークは [Shin-sibainu/ccmux](https://github.com/Shin-sibainu/ccmux) をベースに、VT エミュレータを**フルスクラッチで再実装**しています。
+
+### VT エミュレータを vt100 crate → 自前実装 (vte ベース) に置き換え
+
+フォーク元は `vt100` crate を使用していましたが、以下の構造的制約がありました:
+
+- **スクロール領域 (DECSTBM) 有効時にスクロールバックを保存しない** — Claude Code は DECSTBM ベースの UI を使用するため、ホイールで過去の出力を遡れなかった
+
+この問題を根本解決するために `src/vt/` に自前エミュレータを実装しました (Zellij と同じアーキテクチャ):
+
+| コンポーネント | 説明 |
+|--------------|------|
+| `src/vt/parser.rs` | vte クレートによる VT シーケンス解析 |
+| `src/vt/grid.rs` | 端末グリッド（論理行管理） |
+| `src/vt/scrollback.rs` | スクロールバック履歴 |
+| `src/vt/reflow.rs` | リサイズ時の論理行 reflow |
+| `src/vt/selection.rs` | マウスによるテキスト選択 |
+| `src/vt/cell.rs` | セル（文字・色・属性） |
+| `src/vt/csi.rs` | CSI シーケンス処理 |
+| `src/vt/osc.rs` | OSC シーケンス処理（OSC 52 クリップボード、OSC 8 ハイパーリンク） |
+| `src/vt/widget.rs` | ratatui への描画ブリッジ |
+
+### 論理行 + 描画時 reflow
+
+- リサイズしてもスクロールバックや選択範囲が崩れない
+- 長い行が折り返されても論理的に 1 行として扱われる
+
+### opt-in トレース機能
+
+描画バグの診断用に CSI/OSC/ESC のトレースを環境変数で有効化できます:
+
+```bash
+CCMUX_TRACE_CSI=/tmp/csi.log ccmux
+CCMUX_TRACE_OSC=/tmp/osc.log ccmux
+CCMUX_TRACE_ESC=/tmp/esc.log ccmux
+```
+
+### 設定ファイル
+
+`~/.config/ccmux/config.toml` で動作をカスタマイズできます:
+
+```toml
+[scrollback]
+max_lines = 10000
+
+[osc52]
+allow_read = false
+```
+
+## アーキテクチャ
 
 ```
 src/
-├── main.rs       # Entry point, event loop, panic hook
-├── app.rs        # Workspace/tab state, layout tree, key/mouse handling
-├── pane.rs       # PTY management, vt100 emulation, shell detection
-├── ui.rs         # ratatui rendering, theme, layout
-├── filetree.rs   # File tree scanning, navigation
-└── preview.rs    # File preview with syntax highlighting
+├── main.rs       # エントリポイント、イベントループ、パニックフック
+├── app.rs        # ワークスペース/タブ状態、レイアウトツリー、キー/マウスハンドリング
+├── pane.rs       # PTY 管理、vt::Terminal 保持、スクロールオフセット
+├── ui.rs         # ratatui 描画、テーマ、レイアウト
+├── filetree.rs   # ファイルツリーのスキャン・ナビゲーション
+├── preview.rs    # シンタックスハイライト付きファイルプレビュー
+└── vt/           # 自前 VT エミュレータ
 ```
 
-**Key design decisions:**
-- `vt100` crate for terminal emulation (not ANSI stripping) — needed for Claude Code's interactive UI
-- Binary tree layout for recursive pane splitting with variable ratios
-- Per-PTY reader threads with mpsc channel to main event loop
-- OSC 7 detection for automatic cd tracking
-- Dirty-flag rendering for minimal CPU usage when idle
+**設計の要点:**
+- バイナリツリーレイアウトで可変比率の再帰ペイン分割
+- ペインごとの PTY リーダースレッド + mpsc チャンネルでメインイベントループに送信
+- OSC 7 検出による自動 cd トラッキング
+- ダーティフラグによる描画最適化（アイドル時の CPU 使用を最小化）
 
-## Tech Stack
+## 技術スタック
 
-- [ratatui](https://ratatui.rs/) + [crossterm](https://github.com/crossterm-rs/crossterm) — TUI framework
-- [portable-pty](https://github.com/nickelc/portable-pty) — PTY abstraction (ConPTY on Windows)
-- [vt100](https://crates.io/crates/vt100) — Terminal emulation
-- [syntect](https://github.com/trishume/syntect) — Syntax highlighting
+- [ratatui](https://ratatui.rs/) + [crossterm](https://github.com/crossterm-rs/crossterm) — TUI フレームワーク
+- [portable-pty](https://github.com/nickelc/portable-pty) — PTY 抽象化（Windows では ConPTY）
+- [vte](https://crates.io/crates/vte) — VT シーケンスパーサ
+- [syntect](https://github.com/trishume/syntect) — シンタックスハイライト
 
-## Learn Claude Code
-
-New to Claude Code? Check out [Claude Code Academy](https://claude-code-academy.dev) for tutorials and guides.
-
-## License
+## ライセンス
 
 MIT
