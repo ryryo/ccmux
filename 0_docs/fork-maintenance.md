@@ -6,8 +6,15 @@
 
 | 変更 | ファイル |
 |------|---------|
-| ライトテーマの追加 | `src/ui.rs` |
-| JSON/YAML アイコンの色調整（ライトテーマ向け） | `src/ui.rs` |
+| VT エミュレータを vt100 crate → 自前 vte ベース実装に big-bang 置換 | `src/vt/`（新設） |
+| ライト/ダーク切替可能なテーマ機構 (`Theme::light()` / `Theme::dark()`) | `src/theme.rs`（新設）, `src/ui.rs` |
+| プレビューの syntect テーマがモードに連動 | `src/preview.rs` |
+| `~/.config/ccmux/config.toml` に `[theme]` セクション追加 | `src/config.rs` |
+| README を全面日本語化、フォーク差分セクション追加 | `README.md` |
+
+> 現在進行中の WIP: 設定可能なキーマップ (`src/keymap.rs` ほか)。完了するまでは
+> `cargo install --path .` 時にビルドが落ちるので、stash で退避してからインストールする。
+> 詳細は [`update-workflow.md`](./update-workflow.md) のトラブルシューティング参照。
 
 ---
 
@@ -41,7 +48,11 @@ git log --oneline master ^upstream/master
 git merge upstream/master --no-edit
 ```
 
-> コンフリクトが発生しやすい箇所: `src/ui.rs`（ライトテーマ関連の変更と競合する可能性があります）
+> コンフリクトが発生しやすい箇所:
+> - `src/ui.rs`（テーマ機構：本家は const、こちらは `app.theme.*` 経由）
+> - `src/preview.rs`（syntect テーマ名が動的）
+> - `src/pane.rs`, `src/app.rs`（vt100 → 自前 `vt::Terminal` への置換が広範）
+> - `src/config.rs`（`[theme]` セクション追加分）
 
 ### 5. ビルドして確認
 
@@ -52,8 +63,10 @@ cargo build
 ### 6. 改造版をインストール
 
 ```bash
-cargo install --path .
+cargo install --path . --force
 ```
+
+詳細は [`update-workflow.md`](./update-workflow.md) を参照。
 
 ---
 
@@ -62,15 +75,23 @@ cargo install --path .
 ### インストール
 
 ```bash
-cargo install --path .
+cargo install --path . --force
 ```
 
-`~/.cargo/bin/ccmux` にリリースビルドがインストールされます。
+`~/.cargo/bin/ccmux` にリリースビルドがインストールされます。`--force` を
+忘れるとバージョンが同じ場合スキップされるので注意。
 
 ### PATH の優先順位に注意
 
-npm 経由で `ccmux-cli` も入っている場合、`~/.nvm/.../bin/ccmux` が先に見つかり npm 版が優先されることがあります。
-`~/.cargo/bin` を PATH の先頭に置くことで改造版が優先されます。
+npm 経由で `ccmux-cli` も入っている場合、`~/.nvm/.../bin/ccmux` が見つかって
+npm 版（フォーク元 v0.6 系）が優先されることがあります。原則として
+**npm 版はアンインストール**しておくのが無難です:
+
+```bash
+npm uninstall -g ccmux-cli
+```
+
+`~/.cargo/bin` を PATH の先頭に置くことでも改造版を優先できます。
 
 `~/.zshrc` に追記済み：
 
@@ -90,5 +111,8 @@ which ccmux
 マージ後や独自変更後は毎回以下を実行する：
 
 ```bash
-cargo install --path .
+cargo install --path . --force
 ```
+
+日常的な変更 → 再インストールの流れは [`update-workflow.md`](./update-workflow.md)
+にまとめてあります。
