@@ -797,8 +797,7 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
     let theme = app.theme;
     let focus = app.ws().focus_target;
 
-    // Rename mode overrides focus-specific hints — key input is being
-    // captured by the buffer regardless of which pane/panel is focused.
+    // Rename mode overrides everything — key input is captured by the buffer.
     let hints = if app.rename_input.is_some() {
         Line::from(vec![
             Span::styled(" Enter", Style::default().fg(theme.accent_blue)),
@@ -808,6 +807,16 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
             Span::styled("空Enter", Style::default().fg(theme.accent_blue)),
             Span::styled(" 元に戻す", Style::default().fg(theme.text_dim)),
         ])
+    } else if let Some((ref msg, ref ts)) = app.copy_flash {
+        // Copy flash: shown for 2 seconds after a copy action.
+        if ts.elapsed().as_secs() < 2 {
+            Line::from(Span::styled(
+                format!(" \u{2713} {msg}"),
+                Style::default().fg(theme.accent_green),
+            ))
+        } else {
+            Line::from(build_focus_hints(app, focus))
+        }
     } else {
         Line::from(build_focus_hints(app, focus))
     };
@@ -995,6 +1004,8 @@ fn build_focus_hints<'a>(app: &'a App, focus: FocusTarget) -> Vec<Span<'a>> {
                 first = false;
             }
             push(&mut spans, &mut first, Scope::FileTree, Action::FileTreeOpen, "開く");
+            push(&mut spans, &mut first, Scope::FileTree, Action::FileTreeCopyRelPath, "相対パス");
+            push(&mut spans, &mut first, Scope::FileTree, Action::FileTreeCopyAbsPath, "絶対パス");
             push(&mut spans, &mut first, Scope::FileTree, Action::FileTreeToggleHidden, "隠しファイル");
             push(&mut spans, &mut first, Scope::FileTree, Action::FileTreeBlur, "戻る");
             push(&mut spans, &mut first, Scope::Global, Action::ToggleFileTree, "閉じる");

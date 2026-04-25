@@ -190,7 +190,6 @@ impl FileTree {
     }
 
     /// Get the currently selected entry.
-    #[allow(dead_code)]
     pub fn selected_entry(&self) -> Option<&FlatEntry> {
         self.flat_entries.get(self.selected_index)
     }

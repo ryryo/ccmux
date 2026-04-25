@@ -49,6 +49,8 @@ pub enum Action {
     FileTreeOpen,
     FileTreeToggleHidden,
     FileTreeBlur,
+    FileTreeCopyRelPath,
+    FileTreeCopyAbsPath,
 
     // preview
     PreviewScrollDown,
@@ -86,6 +88,8 @@ impl Action {
             "filetree_open" => Self::FileTreeOpen,
             "filetree_toggle_hidden" => Self::FileTreeToggleHidden,
             "filetree_blur" => Self::FileTreeBlur,
+            "filetree_copy_rel_path" => Self::FileTreeCopyRelPath,
+            "filetree_copy_abs_path" => Self::FileTreeCopyAbsPath,
             "preview_scroll_down" => Self::PreviewScrollDown,
             "preview_scroll_up" => Self::PreviewScrollUp,
             "preview_page_down" => Self::PreviewPageDown,
@@ -274,6 +278,8 @@ impl KeyMap {
         f.insert(KeyChord::new(none, Enter), Action::FileTreeOpen);
         f.insert(KeyChord::new(none, Char('.')), Action::FileTreeToggleHidden);
         f.insert(KeyChord::new(none, Esc), Action::FileTreeBlur);
+        f.insert(KeyChord::new(none, Char('y')), Action::FileTreeCopyRelPath);
+        f.insert(KeyChord::new(ctrl, Char('y')), Action::FileTreeCopyAbsPath);
 
         // preview
         let v = &mut m.preview;

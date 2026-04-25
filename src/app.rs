@@ -432,6 +432,8 @@ pub struct App {
     pub theme: crate::theme::Theme,
     // Resolved key bindings (defaults + user overrides from config)
     pub keymap: crate::keymap::KeyMap,
+    /// Transient message shown in the status bar after a copy action.
+    pub copy_flash: Option<(String, Instant)>,
 }
 
 impl App {
@@ -485,6 +487,7 @@ impl App {
             theme,
             config,
             keymap,
+            copy_flash: None,
         })
     }
 
@@ -765,6 +768,24 @@ impl App {
             }
             A::FileTreeBlur => {
                 self.ws_mut().focus_target = FocusTarget::Pane;
+                ActionResult::Consumed
+            }
+            A::FileTreeCopyRelPath => {
+                if let Some(entry) = self.ws().file_tree.selected_entry().cloned() {
+                    let root = self.ws().file_tree.root_path.clone();
+                    let rel = entry.path.strip_prefix(&root).unwrap_or(&entry.path);
+                    let text = rel.to_string_lossy().into_owned();
+                    self.copy_to_clipboard(&text);
+                    self.copy_flash = Some((format!("Copied: {text}"), Instant::now()));
+                }
+                ActionResult::Consumed
+            }
+            A::FileTreeCopyAbsPath => {
+                if let Some(entry) = self.ws().file_tree.selected_entry().cloned() {
+                    let text = entry.path.to_string_lossy().into_owned();
+                    self.copy_to_clipboard(&text);
+                    self.copy_flash = Some((format!("Copied: {text}"), Instant::now()));
+                }
                 ActionResult::Consumed
             }
             A::PreviewScrollDown => {
