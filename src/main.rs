@@ -1,5 +1,6 @@
 mod app;
 mod claude_monitor;
+mod debug_log;
 mod filetree;
 mod pane;
 mod preview;

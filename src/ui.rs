@@ -565,8 +565,22 @@ fn render_terminal_content(
         // For Claude Code, shift cursor 1 column left because Claude draws its own
         // block character at the cursor position, and the PTY cursor would otherwise
         // appear one column after with a visible gap.
+        // Exception: if the previous cell is a wide-character continuation (i.e. the
+        // right half of a CJK glyph), shifting -1 lands the cursor on top of that
+        // half and visually mangles the glyph. Keep the cursor at its native column
+        // in that case.
         let cursor_x = if pane.is_claude_running() {
-            area.x + cursor.1.saturating_sub(1)
+            let col = cursor.1;
+            let prev_is_wide_cont = col > 0
+                && screen
+                    .cell(cursor.0, col - 1)
+                    .map(|c| c.is_wide_continuation())
+                    .unwrap_or(false);
+            if prev_is_wide_cont {
+                area.x + col
+            } else {
+                area.x + col.saturating_sub(1)
+            }
         } else {
             area.x + cursor.1
         };
