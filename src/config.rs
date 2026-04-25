@@ -1,11 +1,21 @@
 use serde::Deserialize;
 
+use crate::theme::ThemeMode;
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub scrollback: ScrollbackCfg,
     #[serde(default)]
     pub osc52: Osc52Cfg,
+    #[serde(default)]
+    pub theme: ThemeCfg,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ThemeCfg {
+    #[serde(default)]
+    pub mode: ThemeMode,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -49,6 +59,17 @@ mod tests {
         let c = Config::default();
         assert_eq!(c.scrollback.max_lines, 10000);
         assert!(!c.osc52.allow_read);
+        assert_eq!(c.theme.mode, ThemeMode::Light);
+    }
+
+    #[test]
+    fn parses_theme_mode() {
+        let s = r#"
+            [theme]
+            mode = "dark"
+        "#;
+        let c: Config = toml::from_str(s).unwrap();
+        assert_eq!(c.theme.mode, ThemeMode::Dark);
     }
 
     #[test]

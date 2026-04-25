@@ -5,29 +5,14 @@ use ratatui::widgets::{Block, Borders, BorderType, Paragraph};
 use ratatui::Frame;
 
 use crate::app::{App, DragTarget, FocusTarget};
-
-// ─── Theme (Light) ────────────────────────────────────────
-const BG: Color = Color::Rgb(0xf6, 0xf8, 0xfa);
-const PANEL_BG: Color = Color::Rgb(0xff, 0xff, 0xff);
-const BORDER: Color = Color::Rgb(0xd0, 0xd7, 0xde);
-const FOCUS_BORDER: Color = Color::Rgb(0x01, 0x69, 0xda);
-const TEXT: Color = Color::Rgb(0x1f, 0x23, 0x28);
-const TEXT_DIM: Color = Color::Rgb(0x65, 0x6d, 0x76);
-const ACCENT_GREEN: Color = Color::Rgb(0x1a, 0x7f, 0x37);
-const ACCENT_BLUE: Color = Color::Rgb(0x01, 0x69, 0xda);
-const ACCENT_CLAUDE: Color = Color::Rgb(0xc9, 0x5f, 0x2e);
-const HEADER_BG: Color = Color::Rgb(0xef, 0xf2, 0xf5);
-const ACTIVE_TAB_BG: Color = Color::Rgb(0xf6, 0xf8, 0xfa);
-const ACTIVE_BG: Color = Color::Rgb(0xe8, 0xf0, 0xfe);
-const LINE_NUM_COLOR: Color = Color::Rgb(0xaf, 0xb8, 0xc1);
-const SCROLL_BG: Color = Color::Rgb(0xf5, 0xe6, 0xd8);
+use crate::theme::Theme;
 
 const MIN_TERMINAL_WIDTH: u16 = 40;
 const MIN_TERMINAL_HEIGHT: u16 = 10;
 const MIN_PANE_AREA_WIDTH: u16 = 20;
 
 // ─── File type icons ──────────────────────────────────────
-fn file_icon(name: &str) -> (&'static str, Color) {
+fn file_icon(name: &str, theme: Theme) -> (&'static str, Color) {
     let ext = name.rsplit('.').next().unwrap_or("");
     match ext {
         "rs" => ("\u{1f980} ", Color::Rgb(0xde, 0x93, 0x5f)),  // 🦀 orange
@@ -44,25 +29,26 @@ fn file_icon(name: &str) -> (&'static str, Color) {
         "css" | "scss" => ("# ", Color::Rgb(0x56, 0x3d, 0x7c)), // # purple
         "html" => ("< ", Color::Rgb(0xe3, 0x4c, 0x26)),         // < orange
         "gitignore" => ("\u{2022} ", Color::Rgb(0xf0, 0x50, 0x33)), // • git red
-        _ => ("\u{2022} ", TEXT_DIM),                             // • default
+        _ => ("\u{2022} ", theme.text_dim),                             // • default
     }
 }
 
 // ─── Main render ──────────────────────────────────────────
 
 pub fn render(app: &mut App, frame: &mut Frame) {
+    let theme = app.theme;
     let area = frame.area();
     app.last_term_size = (area.width, area.height);
 
     if area.width < MIN_TERMINAL_WIDTH || area.height < MIN_TERMINAL_HEIGHT {
         let msg = Paragraph::new("Terminal too small")
-            .style(Style::default().fg(TEXT_DIM).bg(BG))
+            .style(Style::default().fg(theme.text_dim).bg(theme.bg))
             .alignment(Alignment::Center);
         frame.render_widget(msg, area);
         return;
     }
 
-    let bg_block = Block::default().style(Style::default().bg(BG));
+    let bg_block = Block::default().style(Style::default().bg(theme.bg));
     frame.render_widget(bg_block, area);
 
     let show_status = app.status_bar_visible || app.rename_input.is_some();
@@ -86,6 +72,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 // ─── Tab bar ──────────────────────────────────────────────
 
 fn render_tab_bar(app: &mut App, frame: &mut Frame, area: Rect) {
+    let theme = app.theme;
     let mut spans = Vec::new();
     let mut tab_rects = Vec::new();
     let mut x = area.x;
@@ -93,7 +80,7 @@ fn render_tab_bar(app: &mut App, frame: &mut Frame, area: Rect) {
     // Logo
     spans.push(Span::styled(
         " \u{25c8} ",
-        Style::default().fg(ACCENT_CLAUDE).bg(HEADER_BG).add_modifier(Modifier::BOLD),
+        Style::default().fg(theme.accent_claude).bg(theme.header_bg).add_modifier(Modifier::BOLD),
     ));
     x += 3;
 
@@ -114,8 +101,8 @@ fn render_tab_bar(app: &mut App, frame: &mut Frame, area: Rect) {
             spans.push(Span::styled(
                 label.clone(),
                 Style::default()
-                    .fg(TEXT)
-                    .bg(ACTIVE_TAB_BG)
+                    .fg(theme.text)
+                    .bg(theme.active_tab_bg)
                     .add_modifier(Modifier::BOLD),
             ));
         } else if is_active {
@@ -123,21 +110,21 @@ fn render_tab_bar(app: &mut App, frame: &mut Frame, area: Rect) {
             spans.push(Span::styled(
                 label.clone(),
                 Style::default()
-                    .fg(TEXT)
-                    .bg(ACTIVE_TAB_BG)
+                    .fg(theme.text)
+                    .bg(theme.active_tab_bg)
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             ));
         } else {
             spans.push(Span::styled(
                 label.clone(),
-                Style::default().fg(TEXT_DIM).bg(HEADER_BG),
+                Style::default().fg(theme.text_dim).bg(theme.header_bg),
             ));
         }
 
         tab_rects.push((i, Rect::new(x, area.y, label_width, 1)));
         x += label_width;
 
-        spans.push(Span::styled(" ", Style::default().bg(HEADER_BG)));
+        spans.push(Span::styled(" ", Style::default().bg(theme.header_bg)));
         x += 1;
     }
 
@@ -145,7 +132,7 @@ fn render_tab_bar(app: &mut App, frame: &mut Frame, area: Rect) {
     let plus_label = " + ";
     spans.push(Span::styled(
         plus_label,
-        Style::default().fg(ACCENT_GREEN).bg(HEADER_BG),
+        Style::default().fg(theme.accent_green).bg(theme.header_bg),
     ));
     let plus_rect = Rect::new(x, area.y, plus_label.len() as u16, 1);
     x += plus_label.len() as u16;
@@ -155,7 +142,7 @@ fn render_tab_bar(app: &mut App, frame: &mut Frame, area: Rect) {
     if remaining > 0 {
         spans.push(Span::styled(
             " ".repeat(remaining as usize),
-            Style::default().bg(HEADER_BG),
+            Style::default().bg(theme.header_bg),
         ));
     }
 
@@ -236,23 +223,24 @@ fn render_main_area(app: &mut App, frame: &mut Frame, area: Rect) {
 // ─── File tree ────────────────────────────────────────────
 
 fn render_file_tree(app: &mut App, frame: &mut Frame, area: Rect) {
+    let theme = app.theme;
     let is_focused = app.ws().focus_target == FocusTarget::FileTree;
     let is_border_active = matches!(
         app.dragging.as_ref().or(app.hover_border.as_ref()),
         Some(DragTarget::FileTreeBorder)
     );
     let border_color = if is_border_active {
-        ACCENT_GREEN
+        theme.accent_green
     } else if is_focused {
-        FOCUS_BORDER
+        theme.focus_border
     } else {
-        BORDER
+        theme.border
     };
 
     let title_style = if is_focused {
-        Style::default().fg(ACCENT_BLUE).add_modifier(Modifier::BOLD)
+        Style::default().fg(theme.accent_blue).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(TEXT_DIM)
+        Style::default().fg(theme.text_dim)
     };
 
     let block = Block::default()
@@ -260,7 +248,7 @@ fn render_file_tree(app: &mut App, frame: &mut Frame, area: Rect) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border_color))
         .title(Span::styled(" FILES ", title_style))
-        .style(Style::default().bg(PANEL_BG));
+        .style(Style::default().bg(theme.panel_bg));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -281,9 +269,9 @@ fn render_file_tree(app: &mut App, frame: &mut Frame, area: Rect) {
         // Selection indicator bar on the left
         let indicator = if is_selected { "\u{258e}" } else { " " }; // ▎ or space
         let indicator_style = if is_selected {
-            Style::default().fg(ACCENT_BLUE).bg(ACTIVE_BG)
+            Style::default().fg(theme.accent_blue).bg(theme.active_bg)
         } else {
-            Style::default().fg(PANEL_BG).bg(PANEL_BG)
+            Style::default().fg(theme.panel_bg).bg(theme.panel_bg)
         };
 
         // Tree indent with connector lines
@@ -301,9 +289,9 @@ fn render_file_tree(app: &mut App, frame: &mut Frame, area: Rect) {
         // Icon + name
         let (icon, name_display, name_color) = if entry.is_dir {
             let icon = if entry.is_expanded { "\u{1f4c2} " } else { "\u{1f4c1} " }; // 📂 / 📁
-            (icon, &entry.name, ACCENT_BLUE)
+            (icon, &entry.name, theme.accent_blue)
         } else {
-            let (icon, color) = file_icon(&entry.name);
+            let (icon, color) = file_icon(&entry.name, theme);
             (icon, &entry.name, color)
         };
 
@@ -314,9 +302,9 @@ fn render_file_tree(app: &mut App, frame: &mut Frame, area: Rect) {
         let mut spans = vec![Span::styled(indicator, indicator_style)];
 
         let content_style = if is_selected {
-            Style::default().fg(TEXT).bg(ACTIVE_BG).add_modifier(Modifier::BOLD)
+            Style::default().fg(theme.text).bg(theme.active_bg).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(name_color).bg(PANEL_BG)
+            Style::default().fg(name_color).bg(theme.panel_bg)
         };
 
         spans.push(Span::styled(truncated, content_style));
@@ -330,6 +318,7 @@ fn render_file_tree(app: &mut App, frame: &mut Frame, area: Rect) {
 // ─── Panes ────────────────────────────────────────────────
 
 fn render_panes(app: &mut App, frame: &mut Frame, area: Rect) {
+    let theme = app.theme;
     let rects = app.ws().layout.calculate_rects(area);
     app.ws_mut().last_pane_rects = rects.clone();
 
@@ -366,7 +355,7 @@ fn render_panes(app: &mut App, frame: &mut Frame, area: Rect) {
                 matches!(s.target, crate::app::SelectionTarget::Pane(id) if id == pane_id)
             });
             let claude_state = app.claude_monitor.state(pane_id);
-            render_single_pane(pane, is_focused, pane_sel, &claude_state, frame, rect);
+            render_single_pane(pane, is_focused, pane_sel, &claude_state, frame, rect, theme);
         }
     }
 }
@@ -378,14 +367,15 @@ fn render_single_pane(
     claude_state: &crate::claude_monitor::ClaudeState,
     frame: &mut Frame,
     area: Rect,
+    theme: Theme,
 ) {
     let is_claude = pane.is_claude_running();
     let border_color = if is_focused && is_claude {
-        ACCENT_CLAUDE
+        theme.accent_claude
     } else if is_focused {
-        FOCUS_BORDER
+        theme.focus_border
     } else {
-        BORDER
+        theme.border
     };
 
     let is_scrolled = pane.is_scrolled_back();
@@ -424,18 +414,18 @@ fn render_single_pane(
     };
 
     let title_style = if is_focused && is_claude {
-        Style::default().fg(ACCENT_CLAUDE).add_modifier(Modifier::BOLD)
+        Style::default().fg(theme.accent_claude).add_modifier(Modifier::BOLD)
     } else if is_focused {
-        Style::default().fg(FOCUS_BORDER).add_modifier(Modifier::BOLD)
+        Style::default().fg(theme.focus_border).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(TEXT_DIM)
+        Style::default().fg(theme.text_dim)
     };
 
     // Bottom title: scroll indicator OR claude stats
     let bottom_title = if is_scrolled {
         Line::from(Span::styled(
             " \u{2191} SCROLL ",
-            Style::default().fg(ACCENT_CLAUDE).bg(SCROLL_BG).add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.accent_claude).bg(theme.scroll_bg).add_modifier(Modifier::BOLD),
         ))
     } else if is_claude {
         let mut spans = Vec::new();
@@ -446,7 +436,7 @@ fn render_single_pane(
             let bar = make_progress_bar(completed, total, 10);
             spans.push(Span::styled(
                 format!(" \u{2713} {} {}/{} ", bar, completed, total),
-                Style::default().fg(ACCENT_GREEN),
+                Style::default().fg(theme.accent_green),
             ));
             // Show current in-progress task
             if let Some(current) = claude_state
@@ -457,7 +447,7 @@ fn render_single_pane(
                 let short = truncate_to_width(&current.content, 30);
                 spans.push(Span::styled(
                     format!("\u{25b6} {} ", short),
-                    Style::default().fg(ACCENT_BLUE),
+                    Style::default().fg(theme.accent_blue),
                 ));
             }
         }
@@ -467,7 +457,7 @@ fn render_single_pane(
         if total_tokens > 0 {
             spans.push(Span::styled(
                 format!(" {} tokens ", format_tokens(total_tokens)),
-                Style::default().fg(TEXT_DIM),
+                Style::default().fg(theme.text_dim),
             ));
         }
 
@@ -482,18 +472,18 @@ fn render_single_pane(
         .border_style(Style::default().fg(border_color))
         .title(Span::styled(pane_title, title_style))
         .title_bottom(bottom_title)
-        .style(Style::default().bg(BG));
+        .style(Style::default().bg(theme.bg));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     if pane.exited {
         let msg = Paragraph::new("\u{2718} Process exited")
-            .style(Style::default().fg(TEXT_DIM).bg(BG))
+            .style(Style::default().fg(theme.text_dim).bg(theme.bg))
             .alignment(Alignment::Center);
         frame.render_widget(msg, inner);
     } else {
-        render_terminal_content(pane, is_focused, selection, frame, inner);
+        render_terminal_content(pane, is_focused, selection, frame, inner, theme);
     }
 }
 
@@ -503,6 +493,7 @@ fn render_terminal_content(
     selection: Option<&crate::app::TextSelection>,
     frame: &mut Frame,
     area: Rect,
+    _theme: Theme,
 ) {
     use ratatui::widgets::Widget;
     let rows = area.height;
@@ -587,6 +578,7 @@ fn render_terminal_content(
 // ─── Preview ──────────────────────────────────────────────
 
 fn render_preview(app: &mut App, frame: &mut Frame, area: Rect) {
+    let theme = app.theme;
     // Extract values we need before any mutable borrow.
     let is_focused = app.ws().focus_target == FocusTarget::Preview;
     let filename = app.ws().preview.filename();
@@ -601,20 +593,20 @@ fn render_preview(app: &mut App, frame: &mut Frame, area: Rect) {
         Some(DragTarget::PreviewBorder)
     );
     let border_color = if is_border_active {
-        ACCENT_GREEN
+        theme.accent_green
     } else if is_focused {
-        ACCENT_CLAUDE
+        theme.accent_claude
     } else {
-        BORDER
+        theme.border
     };
 
     // Line count in bottom-right
     let line_info = if is_image {
-        Span::styled(" image ", Style::default().fg(TEXT_DIM))
+        Span::styled(" image ", Style::default().fg(theme.text_dim))
     } else if !is_binary {
         Span::styled(
             format!(" {}/{} ", scroll_pos + 1, line_count),
-            Style::default().fg(TEXT_DIM),
+            Style::default().fg(theme.text_dim),
         )
     } else {
         Span::default()
@@ -626,10 +618,10 @@ fn render_preview(app: &mut App, frame: &mut Frame, area: Rect) {
         .border_style(Style::default().fg(border_color))
         .title(Span::styled(
             title,
-            Style::default().fg(ACCENT_CLAUDE).add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.accent_claude).add_modifier(Modifier::BOLD),
         ))
         .title_bottom(line_info)
-        .style(Style::default().bg(PANEL_BG));
+        .style(Style::default().bg(theme.panel_bg));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -641,7 +633,7 @@ fn render_preview(app: &mut App, frame: &mut Frame, area: Rect) {
             // Skip expensive Sixel re-encode during drag; show placeholder.
             let placeholder = Paragraph::new("Resizing...")
                 .alignment(ratatui::layout::Alignment::Center)
-                .style(Style::default().fg(TEXT_DIM).bg(PANEL_BG));
+                .style(Style::default().fg(theme.text_dim).bg(theme.panel_bg));
             frame.render_widget(placeholder, inner);
         } else if let Some(ref mut protocol) = app.ws_mut().preview.image_protocol {
             let image_widget = ratatui_image::StatefulImage::default()
@@ -653,7 +645,7 @@ fn render_preview(app: &mut App, frame: &mut Frame, area: Rect) {
 
     if is_binary {
         let msg = Paragraph::new("\u{2718} バイナリファイルです")
-            .style(Style::default().fg(TEXT_DIM).bg(PANEL_BG));
+            .style(Style::default().fg(theme.text_dim).bg(theme.panel_bg));
         frame.render_widget(msg, inner);
         return;
     }
@@ -675,7 +667,7 @@ fn render_preview(app: &mut App, frame: &mut Frame, area: Rect) {
         let num_str = format!("{:>4}\u{2502}", line_num);
         let max_content = (inner.width as usize).saturating_sub(5);
 
-        let mut spans = vec![Span::styled(num_str, Style::default().fg(LINE_NUM_COLOR))];
+        let mut spans = vec![Span::styled(num_str, Style::default().fg(theme.line_num))];
 
         if has_highlights && line_idx < ws.preview.highlighted_lines.len() {
             // Drop `h_scroll` chars from the start of the line, walking
@@ -720,10 +712,10 @@ fn render_preview(app: &mut App, frame: &mut Frame, area: Rect) {
             let plain = &ws.preview.lines[line_idx];
             let dropped: String = plain.chars().skip(h_scroll).collect();
             let content = truncate_to_width(&dropped, max_content);
-            spans.push(Span::styled(content, Style::default().fg(TEXT)));
+            spans.push(Span::styled(content, Style::default().fg(theme.text)));
         }
 
-        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(PANEL_BG));
+        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.panel_bg));
         frame.render_widget(paragraph, Rect::new(inner.x, y, inner.width, 1));
     }
 
@@ -788,7 +780,7 @@ fn render_preview(app: &mut App, frame: &mut Frame, area: Rect) {
                             cell.set_style(
                                 Style::default()
                                     .fg(Color::Rgb(0xff, 0xff, 0xff))
-                                    .bg(FOCUS_BORDER),
+                                    .bg(theme.focus_border),
                             );
                         }
                     }
@@ -801,65 +793,66 @@ fn render_preview(app: &mut App, frame: &mut Frame, area: Rect) {
 // ─── Status bar (context-aware) ───────────────────────────
 
 fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = app.theme;
     let focus = app.ws().focus_target;
 
     // Rename mode overrides focus-specific hints — key input is being
     // captured by the buffer regardless of which pane/panel is focused.
     let hints = if app.rename_input.is_some() {
         Line::from(vec![
-            Span::styled(" Enter", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 決定  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("Esc", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 取消  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("空Enter", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 元に戻す", Style::default().fg(TEXT_DIM)),
+            Span::styled(" Enter", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 決定  ", Style::default().fg(theme.text_dim)),
+            Span::styled("Esc", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 取消  ", Style::default().fg(theme.text_dim)),
+            Span::styled("空Enter", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 元に戻す", Style::default().fg(theme.text_dim)),
         ])
     } else { match focus {
         FocusTarget::Preview => Line::from(vec![
-            Span::styled(" Scroll", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" スクロール  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("^W", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 閉じる  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("^P", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 配置替  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("^Q", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 終了", Style::default().fg(TEXT_DIM)),
+            Span::styled(" Scroll", Style::default().fg(theme.accent_blue)),
+            Span::styled(" スクロール  ", Style::default().fg(theme.text_dim)),
+            Span::styled("^W", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 閉じる  ", Style::default().fg(theme.text_dim)),
+            Span::styled("^P", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 配置替  ", Style::default().fg(theme.text_dim)),
+            Span::styled("^Q", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 終了", Style::default().fg(theme.text_dim)),
         ]),
         FocusTarget::FileTree => Line::from(vec![
-            Span::styled(" j/k", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 移動  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("Enter", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 開く  ", Style::default().fg(TEXT_DIM)),
-            Span::styled(".", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 隠しファイル  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("Esc", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 戻る  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("^F", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 閉じる  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("^Q", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 終了", Style::default().fg(TEXT_DIM)),
+            Span::styled(" j/k", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 移動  ", Style::default().fg(theme.text_dim)),
+            Span::styled("Enter", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 開く  ", Style::default().fg(theme.text_dim)),
+            Span::styled(".", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 隠しファイル  ", Style::default().fg(theme.text_dim)),
+            Span::styled("Esc", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 戻る  ", Style::default().fg(theme.text_dim)),
+            Span::styled("^F", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 閉じる  ", Style::default().fg(theme.text_dim)),
+            Span::styled("^Q", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 終了", Style::default().fg(theme.text_dim)),
         ]),
         FocusTarget::Pane => Line::from(vec![
-            Span::styled(" ^D", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 縦分割  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("^E", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 横分割  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("^W", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 閉じる  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("A-T", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 新タブ  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("A-R", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" タブ名  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("^F", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" ツリー  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("^P", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 配置替  ", Style::default().fg(TEXT_DIM)),
-            Span::styled("^Q", Style::default().fg(ACCENT_BLUE)),
-            Span::styled(" 終了", Style::default().fg(TEXT_DIM)),
+            Span::styled(" ^D", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 縦分割  ", Style::default().fg(theme.text_dim)),
+            Span::styled("^E", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 横分割  ", Style::default().fg(theme.text_dim)),
+            Span::styled("^W", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 閉じる  ", Style::default().fg(theme.text_dim)),
+            Span::styled("A-T", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 新タブ  ", Style::default().fg(theme.text_dim)),
+            Span::styled("A-R", Style::default().fg(theme.accent_blue)),
+            Span::styled(" タブ名  ", Style::default().fg(theme.text_dim)),
+            Span::styled("^F", Style::default().fg(theme.accent_blue)),
+            Span::styled(" ツリー  ", Style::default().fg(theme.text_dim)),
+            Span::styled("^P", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 配置替  ", Style::default().fg(theme.text_dim)),
+            Span::styled("^Q", Style::default().fg(theme.accent_blue)),
+            Span::styled(" 終了", Style::default().fg(theme.text_dim)),
         ]),
     }};
 
-    let status = Paragraph::new(hints).style(Style::default().bg(HEADER_BG));
+    let status = Paragraph::new(hints).style(Style::default().bg(theme.header_bg));
     frame.render_widget(status, area);
 
     // Right-side info: Claude state of focused pane
@@ -878,7 +871,7 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
         if let Some(model) = claude_state.short_model() {
             right_spans.push(Span::styled(
                 format!(" \u{1f9e0} {} ", model),
-                Style::default().fg(ACCENT_CLAUDE),
+                Style::default().fg(theme.accent_claude),
             ));
         }
 
@@ -895,7 +888,7 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
             } else if ratio > 0.7 {
                 Color::Rgb(0xd2, 0x99, 0x22) // yellow
             } else {
-                ACCENT_GREEN
+                theme.accent_green
             };
             right_spans.push(Span::styled(
                 format!(
@@ -914,7 +907,7 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
         let short = truncate_to_width(branch, 20);
         right_spans.push(Span::styled(
             format!(" \u{2387} {} ", short),
-            Style::default().fg(ACCENT_BLUE),
+            Style::default().fg(theme.accent_blue),
         ));
     }
 
@@ -923,7 +916,7 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
         right_spans.push(Span::styled(
             format!(" \u{2191} v{} ", new_version),
             Style::default()
-                .fg(ACCENT_CLAUDE)
+                .fg(theme.accent_claude)
                 .add_modifier(Modifier::BOLD),
         ));
     }
@@ -937,7 +930,7 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
             let right_rect =
                 Rect::new(area.x + area.width - total_width, area.y, total_width, 1);
             let widget =
-                Paragraph::new(Line::from(right_spans)).style(Style::default().bg(HEADER_BG));
+                Paragraph::new(Line::from(right_spans)).style(Style::default().bg(theme.header_bg));
             frame.render_widget(widget, right_rect);
         }
     }

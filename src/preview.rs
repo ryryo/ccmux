@@ -34,6 +34,9 @@ pub struct Preview {
     pub is_binary: bool,
     /// Image preview state (set when an image file is loaded).
     pub image_protocol: Option<StatefulProtocol>,
+    /// syntect テーマ名（`InspiredGitHub` など）。`config.toml` の
+    /// `[theme] mode` に応じて App から注入される。
+    syntect_theme: &'static str,
     syntax_set: SyntaxSet,
     theme_set: ThemeSet,
 }
@@ -48,9 +51,15 @@ impl Preview {
             h_scroll_offset: 0,
             is_binary: false,
             image_protocol: None,
+            syntect_theme: "InspiredGitHub",
             syntax_set: SyntaxSet::load_defaults_newlines(),
             theme_set: ThemeSet::load_defaults(),
         }
+    }
+
+    /// 起動時 / テーマ切替時に呼んで syntect のテーマ名を差し替える。
+    pub fn set_syntect_theme(&mut self, name: &'static str) {
+        self.syntect_theme = name;
     }
 
     /// Check if the current preview is an image.
@@ -155,7 +164,18 @@ impl Preview {
             .flatten()
             .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text());
 
-        let theme = &self.theme_set.themes["base16-eighties.dark"];
+        let theme = self
+            .theme_set
+            .themes
+            .get(self.syntect_theme)
+            .unwrap_or_else(|| &self.theme_set.themes["InspiredGitHub"]);
+        // syntect テーマ自身の前景色（無ければ中庸な灰色）。ハイライト失敗
+        // 時のフォールバックや、明示的な fg を持たないトークンに使う。
+        let theme_fg = theme
+            .settings
+            .foreground
+            .map(|c| (c.r, c.g, c.b))
+            .unwrap_or((0x80, 0x80, 0x80));
         let mut highlighter = HighlightLines::new(syntax, theme);
 
         self.highlighted_lines.clear();
@@ -178,10 +198,10 @@ impl Preview {
                     self.highlighted_lines.push(spans);
                 }
                 Err(_) => {
-                    // Fallback: plain text
+                    // Fallback: plain text in the theme's foreground color.
                     self.highlighted_lines.push(vec![StyledSpan {
                         text: line.clone(),
-                        fg: (0xe6, 0xed, 0xf3),
+                        fg: theme_fg,
                     }]);
                 }
             }

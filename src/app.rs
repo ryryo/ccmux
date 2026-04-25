@@ -402,6 +402,8 @@ pub struct App {
     pub image_picker: Option<ratatui_image::picker::Picker>,
     // User configuration (from ~/.config/ccmux/config.toml)
     pub config: crate::config::Config,
+    // Resolved color theme (derived from config.theme.mode at startup)
+    pub theme: crate::theme::Theme,
 }
 
 impl App {
@@ -414,7 +416,9 @@ impl App {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let name = dir_name(&cwd);
 
-        let ws = Workspace::new(name, cwd, 1, pane_rows, pane_cols, event_tx.clone(), config.scrollback.max_lines)?;
+        let theme = crate::theme::Theme::from_mode(config.theme.mode);
+        let mut ws = Workspace::new(name, cwd, 1, pane_rows, pane_cols, event_tx.clone(), config.scrollback.max_lines)?;
+        ws.preview.set_syntect_theme(theme.syntect_theme);
 
         Ok(Self {
             workspaces: vec![ws],
@@ -448,6 +452,7 @@ impl App {
             claude_monitor: crate::claude_monitor::ClaudeMonitor::new(),
             clipboard: None,
             image_picker: None,
+            theme,
             config,
         })
     }
@@ -914,7 +919,8 @@ impl App {
         let pane_id = self.next_pane_id;
         self.next_pane_id = self.next_pane_id.wrapping_add(1);
 
-        let ws = Workspace::new(name, cwd, pane_id, 10, 40, self.event_tx.clone(), self.config.scrollback.max_lines)?;
+        let mut ws = Workspace::new(name, cwd, pane_id, 10, 40, self.event_tx.clone(), self.config.scrollback.max_lines)?;
+        ws.preview.set_syntect_theme(self.theme.syntect_theme);
         self.workspaces.push(ws);
         self.active_tab = self.workspaces.len() - 1;
         Ok(())

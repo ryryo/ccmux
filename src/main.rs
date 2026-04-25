@@ -6,6 +6,7 @@ mod filetree;
 mod mouse_encode;
 mod pane;
 mod preview;
+mod theme;
 mod ui;
 mod version_check;
 use ccmux::vt;
