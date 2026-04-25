@@ -113,6 +113,47 @@ impl KeyChord {
         Self { mods, code }
     }
 
+    /// ステータスバー向けの短縮表記。Ctrl+letter は `^X`、Alt+letter は
+    /// `A-X`、Shift は `S-` プレフィクス。特殊キーは `Enter` / `Esc` /
+    /// `PgUp` のような短い名前。
+    pub fn display_short(&self) -> String {
+        let mut out = String::new();
+        let has_ctrl = self.mods.contains(KeyModifiers::CONTROL);
+        let has_alt = self.mods.contains(KeyModifiers::ALT);
+        let has_shift = self.mods.contains(KeyModifiers::SHIFT);
+        if has_ctrl {
+            out.push('^');
+        }
+        if has_alt {
+            out.push_str("A-");
+        }
+        if has_shift {
+            out.push_str("S-");
+        }
+        match self.code {
+            KeyCode::Char(' ') => out.push_str("Space"),
+            KeyCode::Char(c) => out.push(c.to_ascii_uppercase()),
+            KeyCode::Enter => out.push_str("Enter"),
+            KeyCode::Esc => out.push_str("Esc"),
+            KeyCode::Tab => out.push_str("Tab"),
+            KeyCode::BackTab => out.push_str("S-Tab"),
+            KeyCode::Backspace => out.push_str("BS"),
+            KeyCode::Delete => out.push_str("Del"),
+            KeyCode::Insert => out.push_str("Ins"),
+            KeyCode::Home => out.push_str("Home"),
+            KeyCode::End => out.push_str("End"),
+            KeyCode::PageUp => out.push_str("PgUp"),
+            KeyCode::PageDown => out.push_str("PgDn"),
+            KeyCode::Up => out.push('↑'),
+            KeyCode::Down => out.push('↓'),
+            KeyCode::Left => out.push('←'),
+            KeyCode::Right => out.push('→'),
+            KeyCode::F(n) => out.push_str(&format!("F{n}")),
+            _ => out.push('?'),
+        }
+        out
+    }
+
     /// `"ctrl+d"` のような文字列を chord にパースする。
     /// `+` 区切り、修飾キー (ctrl/alt/shift) は順序非依存、大文字小文字
     /// 不問。最後のトークンがキー本体。文字キーは単一文字、特殊キーは
@@ -265,6 +306,25 @@ impl KeyMap {
         map.get(&chord).copied()
     }
 
+    /// 指定スコープで `action` に紐付いている chord を 1 つ返す。
+    /// 同じアクションに複数キーが割当たっている場合は安定した順序
+    /// (modifier の少ない方優先 → コードの順) を選ぶので、ステータス
+    /// バー表示が起動ごとにブレない。
+    pub fn find_chord(&self, scope: Scope, action: Action) -> Option<KeyChord> {
+        let map = match scope {
+            Scope::Global => &self.global,
+            Scope::Pane => &self.pane,
+            Scope::FileTree => &self.file_tree,
+            Scope::Preview => &self.preview,
+        };
+        let mut hits: Vec<KeyChord> = map
+            .iter()
+            .filter_map(|(c, a)| (*a == action).then_some(*c))
+            .collect();
+        hits.sort_by_key(|c| (c.mods.bits(), key_code_sort_key(c.code)));
+        hits.into_iter().next()
+    }
+
     /// ユーザ設定を既定値の上にマージする。
     /// - 同じキーは上書き
     /// - アクションが `"none"` のときはそのキーを削除 (無効化)
@@ -273,6 +333,29 @@ impl KeyMap {
         merge(&mut self.pane, &user.pane);
         merge(&mut self.file_tree, &user.file_tree);
         merge(&mut self.preview, &user.preview);
+    }
+}
+
+fn key_code_sort_key(code: KeyCode) -> (u8, u32) {
+    match code {
+        KeyCode::Char(c) => (0, c as u32),
+        KeyCode::Enter => (1, 0),
+        KeyCode::Esc => (1, 1),
+        KeyCode::Tab => (1, 2),
+        KeyCode::BackTab => (1, 3),
+        KeyCode::Backspace => (1, 4),
+        KeyCode::Delete => (1, 5),
+        KeyCode::Insert => (1, 6),
+        KeyCode::Home => (1, 7),
+        KeyCode::End => (1, 8),
+        KeyCode::PageUp => (1, 9),
+        KeyCode::PageDown => (1, 10),
+        KeyCode::Up => (2, 0),
+        KeyCode::Down => (2, 1),
+        KeyCode::Left => (2, 2),
+        KeyCode::Right => (2, 3),
+        KeyCode::F(n) => (3, n as u32),
+        _ => (9, 0),
     }
 }
 

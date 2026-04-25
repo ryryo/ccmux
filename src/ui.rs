@@ -5,6 +5,7 @@ use ratatui::widgets::{Block, Borders, BorderType, Paragraph};
 use ratatui::Frame;
 
 use crate::app::{App, DragTarget, FocusTarget};
+use crate::keymap::{Action, Scope};
 use crate::theme::Theme;
 
 const MIN_TERMINAL_WIDTH: u16 = 40;
@@ -807,50 +808,9 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
             Span::styled("空Enter", Style::default().fg(theme.accent_blue)),
             Span::styled(" 元に戻す", Style::default().fg(theme.text_dim)),
         ])
-    } else { match focus {
-        FocusTarget::Preview => Line::from(vec![
-            Span::styled(" Scroll", Style::default().fg(theme.accent_blue)),
-            Span::styled(" スクロール  ", Style::default().fg(theme.text_dim)),
-            Span::styled("^W", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 閉じる  ", Style::default().fg(theme.text_dim)),
-            Span::styled("^P", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 配置替  ", Style::default().fg(theme.text_dim)),
-            Span::styled("^Q", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 終了", Style::default().fg(theme.text_dim)),
-        ]),
-        FocusTarget::FileTree => Line::from(vec![
-            Span::styled(" j/k", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 移動  ", Style::default().fg(theme.text_dim)),
-            Span::styled("Enter", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 開く  ", Style::default().fg(theme.text_dim)),
-            Span::styled(".", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 隠しファイル  ", Style::default().fg(theme.text_dim)),
-            Span::styled("Esc", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 戻る  ", Style::default().fg(theme.text_dim)),
-            Span::styled("^F", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 閉じる  ", Style::default().fg(theme.text_dim)),
-            Span::styled("^Q", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 終了", Style::default().fg(theme.text_dim)),
-        ]),
-        FocusTarget::Pane => Line::from(vec![
-            Span::styled(" ^D", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 縦分割  ", Style::default().fg(theme.text_dim)),
-            Span::styled("^E", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 横分割  ", Style::default().fg(theme.text_dim)),
-            Span::styled("^W", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 閉じる  ", Style::default().fg(theme.text_dim)),
-            Span::styled("A-T", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 新タブ  ", Style::default().fg(theme.text_dim)),
-            Span::styled("A-R", Style::default().fg(theme.accent_blue)),
-            Span::styled(" タブ名  ", Style::default().fg(theme.text_dim)),
-            Span::styled("^F", Style::default().fg(theme.accent_blue)),
-            Span::styled(" ツリー  ", Style::default().fg(theme.text_dim)),
-            Span::styled("^P", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 配置替  ", Style::default().fg(theme.text_dim)),
-            Span::styled("^Q", Style::default().fg(theme.accent_blue)),
-            Span::styled(" 終了", Style::default().fg(theme.text_dim)),
-        ]),
-    }};
+    } else {
+        Line::from(build_focus_hints(app, focus))
+    };
 
     let status = Paragraph::new(hints).style(Style::default().bg(theme.header_bg));
     frame.render_widget(status, area);
@@ -978,5 +938,85 @@ fn truncate_to_width(s: &str, max_width: usize) -> String {
         width += ch_width;
     }
     result
+}
+
+// ─── Status bar hints (keymap-driven) ─────────────────────
+
+fn build_focus_hints<'a>(app: &'a App, focus: FocusTarget) -> Vec<Span<'a>> {
+    let theme = app.theme;
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    let mut first = true;
+
+    let push = |spans: &mut Vec<Span<'a>>,
+                    first: &mut bool,
+                    scope: Scope,
+                    action: Action,
+                    label: &'a str| {
+        let Some(chord) = app.keymap.find_chord(scope, action) else {
+            return;
+        };
+        let prefix = if *first { " " } else { "  " };
+        *first = false;
+        spans.push(Span::styled(
+            format!("{prefix}{}", chord.display_short()),
+            Style::default().fg(theme.accent_blue),
+        ));
+        spans.push(Span::styled(
+            format!(" {label}"),
+            Style::default().fg(theme.text_dim),
+        ));
+    };
+
+    match focus {
+        FocusTarget::Pane => {
+            push(&mut spans, &mut first, Scope::Pane, Action::SplitVertical, "縦分割");
+            push(&mut spans, &mut first, Scope::Pane, Action::SplitHorizontal, "横分割");
+            push(&mut spans, &mut first, Scope::Pane, Action::ClosePaneOrTab, "閉じる");
+            push(&mut spans, &mut first, Scope::Global, Action::NewTab, "新タブ");
+            push(&mut spans, &mut first, Scope::Global, Action::RenameTab, "タブ名");
+            push(&mut spans, &mut first, Scope::Global, Action::ToggleFileTree, "ツリー");
+            push(&mut spans, &mut first, Scope::Global, Action::SwapLayout, "配置替");
+            push(&mut spans, &mut first, Scope::Global, Action::Quit, "終了");
+        }
+        FocusTarget::FileTree => {
+            // 上下移動は j/k と矢印が両方割当たっているのでまとめて
+            // "j/k" の固定ラベルにする (display_short は片方しか出せない)。
+            let down = app.keymap.find_chord(Scope::FileTree, Action::FileTreeDown);
+            let up = app.keymap.find_chord(Scope::FileTree, Action::FileTreeUp);
+            if down.is_some() && up.is_some() {
+                spans.push(Span::styled(
+                    format!(" {}/{}", up.unwrap().display_short(), down.unwrap().display_short()),
+                    Style::default().fg(theme.accent_blue),
+                ));
+                spans.push(Span::styled(
+                    " 移動".to_string(),
+                    Style::default().fg(theme.text_dim),
+                ));
+                first = false;
+            }
+            push(&mut spans, &mut first, Scope::FileTree, Action::FileTreeOpen, "開く");
+            push(&mut spans, &mut first, Scope::FileTree, Action::FileTreeToggleHidden, "隠しファイル");
+            push(&mut spans, &mut first, Scope::FileTree, Action::FileTreeBlur, "戻る");
+            push(&mut spans, &mut first, Scope::Global, Action::ToggleFileTree, "閉じる");
+            push(&mut spans, &mut first, Scope::Global, Action::Quit, "終了");
+        }
+        FocusTarget::Preview => {
+            // スクロール系は j/k/PgUp/PgDn 等多数あるので固定で「Scroll」
+            spans.push(Span::styled(
+                " Scroll".to_string(),
+                Style::default().fg(theme.accent_blue),
+            ));
+            spans.push(Span::styled(
+                " スクロール".to_string(),
+                Style::default().fg(theme.text_dim),
+            ));
+            first = false;
+            push(&mut spans, &mut first, Scope::Preview, Action::PreviewClose, "閉じる");
+            push(&mut spans, &mut first, Scope::Global, Action::SwapLayout, "配置替");
+            push(&mut spans, &mut first, Scope::Global, Action::Quit, "終了");
+        }
+    }
+
+    spans
 }
 
