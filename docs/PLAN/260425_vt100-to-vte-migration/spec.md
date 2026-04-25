@@ -293,6 +293,7 @@ allow_read = false
 | `src/app.rs:1093-1591` | マウス/スクロール/選択関連の現行コード |
 | `CLAUDE.md` | プロジェクト規約 (バージョニング・リリース手順) |
 | `docs/cjk-cursor-bug-report.md` | 過去の CJK 幅問題の経緯 |
+| `0_docs/pty-byte-trace-debugging.md` | TUI 描画バグを実バイト列で根本診断する手順 (Gate G7 で `\e[>4;2m` の誤解釈バグを発見した実績あり、再発時はこれを使う) |
 
 ### 参照資料
 
@@ -460,8 +461,8 @@ Gate H: クリーンアップ・ドキュメント（Gate G 完了後）
   > **Review G5**: ✅ PASSED — PASS — SGR 31m→Indexed(1), 0m→reset, 1;38;2;0;255;0m→BOLD+RGB(0,255,0)
 - [x] **G6**: 実機手動チェックリスト作成
   > **Review G6**: ⏭️ SKIPPED — SKIPPED (docs only) — tests/manual-checklist.md
-- [ ] **G7**: 実機手動通しテスト 1 回目
-  > **Review G7**: _未記入_
+- [x] **G7**: 実機手動通しテスト 1 回目
+  > **Review G7**: ✅ PASSED (FIX 2回) — PASS — manual-checklist の 1-8 を実機通過 (config も確認)。通過中に Claude Code で「全文に下線」回帰を検出 → \e[>4;2m (xterm modifyOtherKeys, intermediate=`>`) を SGR と誤解釈していた根本原因を 0_docs/pty-byte-trace-debugging.md に記述した PTY バイト採取手順で特定し commit 668b190 で fix
 
 **Gate G 通過条件**: 全 Review 結果記入欄が埋まり、総合判定が PASS であること
 

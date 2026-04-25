@@ -10,7 +10,7 @@
   "status": "in-progress",
   "reviewChecked": false,
   "progress": {
-    "completed": 82,
+    "completed": 84,
     "total": 90
   },
   "preflight": [],
@@ -1647,13 +1647,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 2,
+            "summary": "PASS — manual-checklist の 1-8 を実機通過 (config も確認)。通過中に Claude Code で「全文に下線」回帰を検出 → \\e[>4;2m (xterm modifyOtherKeys, intermediate=`>`) を SGR と誤解釈していた根本原因を 0_docs/pty-byte-trace-debugging.md に記述した PTY バイト採取手順で特定し commit 668b190 で fix"
+          }
         }
       ]
     },
