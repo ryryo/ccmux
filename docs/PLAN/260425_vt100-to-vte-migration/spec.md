@@ -357,23 +357,23 @@ Gate H: クリーンアップ・ドキュメント（Gate G 完了後）
 
 > vte::Parser::Performer を実装し、CSI/OSC/SGR/DECSTBM を Grid に反映
 
-- [ ] **B1**: vte::Performer 実装の骨格
+- [x] **B1**: vte::Performer 実装の骨格
   > **Review B1**: _未記入_
-- [ ] **B2**: [TDD] print: 文字書き込み + auto-wrap + CJK ワイド処理
+- [x] **B2**: [TDD] print: 文字書き込み + auto-wrap + CJK ワイド処理
   > **Review B2**: _未記入_
-- [ ] **B3**: [TDD] execute: 制御文字 (LF/CR/BS/HT/BEL)
+- [x] **B3**: [TDD] execute: 制御文字 (LF/CR/BS/HT/BEL)
   > **Review B3**: _未記入_
-- [ ] **B4**: [TDD] スクロール処理 + scrollback 保存条件
+- [x] **B4**: [TDD] スクロール処理 + scrollback 保存条件
   > **Review B4**: _未記入_
-- [ ] **B5**: [TDD] CSI ハンドラ: SGR (色 + 属性)
+- [x] **B5**: [TDD] CSI ハンドラ: SGR (色 + 属性)
   > **Review B5**: _未記入_
-- [ ] **B6**: [TDD] CSI ハンドラ: カーソル移動 + 消去
+- [x] **B6**: [TDD] CSI ハンドラ: カーソル移動 + 消去
   > **Review B6**: _未記入_
-- [ ] **B7**: [TDD] CSI プライベートモード: alt screen / DECAWM / マウス / bracketed paste
+- [x] **B7**: [TDD] CSI プライベートモード: alt screen / DECAWM / マウス / bracketed paste
   > **Review B7**: _未記入_
-- [ ] **B8**: [TDD] OSC ディスパッチ: 7 / 0 / 2 / 8 / 52
+- [x] **B8**: [TDD] OSC ディスパッチ: 7 / 0 / 2 / 8 / 52
   > **Review B8**: _未記入_
-- [ ] **B9**: [TDD] ESC ディスパッチ: RIS / DECSC / DECRC / RI
+- [x] **B9**: [TDD] ESC ディスパッチ: RIS / DECSC / DECRC / RI
   > **Review B9**: _未記入_
 
 **Gate B 通過条件**: 全 Review 結果記入欄が埋まり、総合判定が PASS であること

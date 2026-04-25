@@ -204,6 +204,35 @@ impl Grid {
         !self.use_alternate && self.scroll_top == 0
     }
 
+    /// Scroll the active scroll region up by `count` lines. Lines pushed off
+    /// the top of the region are saved to scrollback iff `should_save_to_scrollback`
+    /// (xterm rule: alt screen inactive AND scroll_top == 0). Blank lines are
+    /// inserted at the bottom of the region.
+    pub fn scroll_up_in_region(&mut self, count: u16) {
+        if count == 0 {
+            return;
+        }
+        let top = self.scroll_top as usize;
+        let bottom = self.scroll_bottom as usize;
+        if top >= bottom {
+            return;
+        }
+        let save = self.should_save_to_scrollback();
+        let cols = self.cols as usize;
+        let count = (count as usize).min(bottom - top + 1);
+        let buf = self.current_buffer_mut();
+        for _ in 0..count {
+            if top >= buf.visible.len() || bottom >= buf.visible.len() {
+                break;
+            }
+            let removed = buf.visible.remove(top);
+            if save {
+                buf.scrollback.push(removed);
+            }
+            buf.visible.insert(bottom, LogicalLine::new(cols));
+        }
+    }
+
     pub fn blank_cell(&self) -> Cell {
         Cell {
             ch: ' ',
@@ -309,6 +338,48 @@ mod tests {
         assert!(g.should_save_to_scrollback());
         g.enter_alternate();
         assert!(!g.should_save_to_scrollback());
+    }
+
+    #[test]
+    fn scroll_up_in_region_default_saves_scrollback() {
+        let mut g = Grid::new(4, 5, 100);
+        g.primary.visible[0].cells[0].ch = 'A';
+        g.scroll_up_in_region(1);
+        assert_eq!(g.primary.scrollback.len(), 1);
+        assert_eq!(g.primary.scrollback.get(0).unwrap().cells[0].ch, 'A');
+        assert_eq!(g.primary.visible.len(), 4);
+    }
+
+    #[test]
+    fn scroll_up_in_region_with_decstbm_top_zero_still_saves() {
+        // Mimics Claude Code: scroll_top=0, scroll_bottom < rows-1.
+        let mut g = Grid::new(5, 5, 100);
+        g.set_scroll_region(0, 3);
+        g.primary.visible[0].cells[0].ch = 'A';
+        g.primary.visible[4].cells[0].ch = 'X'; // out-of-region; must not move
+        g.scroll_up_in_region(1);
+        assert_eq!(g.primary.scrollback.len(), 1);
+        assert_eq!(g.primary.scrollback.get(0).unwrap().cells[0].ch, 'A');
+        assert_eq!(g.primary.visible[4].cells[0].ch, 'X');
+    }
+
+    #[test]
+    fn scroll_up_in_region_top_nonzero_does_not_save() {
+        let mut g = Grid::new(5, 5, 100);
+        g.set_scroll_region(1, 4);
+        g.primary.visible[1].cells[0].ch = 'A';
+        g.scroll_up_in_region(1);
+        assert_eq!(g.primary.scrollback.len(), 0);
+    }
+
+    #[test]
+    fn scroll_up_in_region_alt_screen_does_not_save() {
+        let mut g = Grid::new(4, 5, 100);
+        g.enter_alternate();
+        g.alternate.visible[0].cells[0].ch = 'A';
+        g.scroll_up_in_region(1);
+        assert_eq!(g.primary.scrollback.len(), 0);
+        assert_eq!(g.alternate.scrollback.len(), 0);
     }
 
     #[test]
