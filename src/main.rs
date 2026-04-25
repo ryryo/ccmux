@@ -6,6 +6,7 @@ mod pane;
 mod preview;
 mod ui;
 mod version_check;
+use ccmux::vt;
 
 use std::io;
 use std::panic;

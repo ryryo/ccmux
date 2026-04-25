@@ -336,20 +336,20 @@ Gate H: クリーンアップ・ドキュメント（Gate G 完了後）
 
 > Cell/Line/Buffer/Grid/Scrollback の基本型を定義し、TDD で固める
 
-- [ ] **A1**: Cargo.toml 依存差し替え
-  > **Review A1**: _未記入_
-- [ ] **A2**: [TDD] Cell/Color/CellAttrs 型
-  > **Review A2**: _未記入_
-- [ ] **A3**: [TDD] LogicalLine 型 + soft-wrap メタ
-  > **Review A3**: _未記入_
-- [ ] **A4**: [TDD] CJK 幅計算 width.rs
-  > **Review A4**: _未記入_
-- [ ] **A5**: [TDD] Scrollback ring buffer
-  > **Review A5**: _未記入_
-- [ ] **A6**: [TDD] Cursor + Buffer 構造体
-  > **Review A6**: _未記入_
-- [ ] **A7**: [TDD] Grid + alternate screen 切替 + DECSTBM 状態
-  > **Review A7**: _未記入_
+- [x] **A1**: Cargo.toml 依存差し替え
+  > **Review A1**: ⏭️ SKIPPED — 設定のみ(vt100→vte/serde/toml)。cargo build で deps 解決確認、vt100 参照箇所の compile error は仕様通り後続 Todo で解消
+- [x] **A2**: [TDD] Cell/Color/CellAttrs 型
+  > **Review A2**: ✅ PASSED — 3 レビュアー (correctness/quality/conventions) 全員 PASS。31 unit tests green。設計決定事項 #1/#3/#6/#9 と整合
+- [x] **A3**: [TDD] LogicalLine 型 + soft-wrap メタ
+  > **Review A3**: ✅ PASSED — 3 レビュアー (correctness/quality/conventions) 全員 PASS。31 unit tests green。設計決定事項 #1/#3/#6/#9 と整合
+- [x] **A4**: [TDD] CJK 幅計算 width.rs
+  > **Review A4**: ✅ PASSED — 3 レビュアー (correctness/quality/conventions) 全員 PASS。31 unit tests green。設計決定事項 #1/#3/#6/#9 と整合
+- [x] **A5**: [TDD] Scrollback ring buffer
+  > **Review A5**: ✅ PASSED — 3 レビュアー (correctness/quality/conventions) 全員 PASS。31 unit tests green。設計決定事項 #1/#3/#6/#9 と整合
+- [x] **A6**: [TDD] Cursor + Buffer 構造体
+  > **Review A6**: ✅ PASSED — 3 レビュアー (correctness/quality/conventions) 全員 PASS。31 unit tests green。設計決定事項 #1/#3/#6/#9 と整合
+- [x] **A7**: [TDD] Grid + alternate screen 切替 + DECSTBM 状態
+  > **Review A7**: ✅ PASSED — 3 レビュアー (correctness/quality/conventions) 全員 PASS。31 unit tests green。設計決定事項 #1/#3/#6/#9 と整合
 
 **Gate A 通過条件**: 全 Review 結果記入欄が埋まり、総合判定が PASS であること
 
