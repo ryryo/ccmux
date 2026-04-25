@@ -1,0 +1,20 @@
+row 0:
+  'r' fg=idx1 bits=0x00 link=0
+  'e' fg=idx1 bits=0x00 link=0
+  'd' fg=idx1 bits=0x00 link=0
+  'p' fg=default bits=0x00 link=0
+  'l' fg=default bits=0x00 link=0
+  'a' fg=default bits=0x00 link=0
+  'i' fg=default bits=0x00 link=0
+  'n' fg=default bits=0x00 link=0
+  'g' fg=rgb(0,255,0) bits=0x01 link=0
+  'r' fg=rgb(0,255,0) bits=0x01 link=0
+  'e' fg=rgb(0,255,0) bits=0x01 link=0
+  'e' fg=rgb(0,255,0) bits=0x01 link=0
+  'n' fg=rgb(0,255,0) bits=0x01 link=0
+  '-' fg=rgb(0,255,0) bits=0x01 link=0
+  'b' fg=rgb(0,255,0) bits=0x01 link=0
+  'o' fg=rgb(0,255,0) bits=0x01 link=0
+  'l' fg=rgb(0,255,0) bits=0x01 link=0
+  'd' fg=rgb(0,255,0) bits=0x01 link=0
+row 1:

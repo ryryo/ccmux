@@ -10,7 +10,7 @@
   "status": "in-progress",
   "reviewChecked": false,
   "progress": {
-    "completed": 70,
+    "completed": 82,
     "total": 90
   },
   "preflight": [],
@@ -1417,13 +1417,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — render_grid/render_grid_styled/assert_snapshot 基盤、CCMUX_UPDATE_SNAPSHOTS=1 で生成、決定的"
+          }
         }
       ]
     },
@@ -1454,13 +1458,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — DECSTBM region で 11 行が scrollback に保存される (★主目的、spec の 10 は概算で実測 11 が正、>=10 アサート + テキスト snapshot で固定)"
+          }
         }
       ]
     },
@@ -1491,13 +1499,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — ?1049h/l で alt screen 書き込みが scrollback に漏れない (assert_eq! と snapshot)"
+          }
         }
       ]
     },
@@ -1528,13 +1540,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — CJK auto-wrap で文字境界が割れない (visual_width<=10 + 厳密 snapshot)"
+          }
         }
       ]
     },
@@ -1565,13 +1581,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — SGR 31m→Indexed(1), 0m→reset, 1;38;2;0;255;0m→BOLD+RGB(0,255,0)"
+          }
         }
       ]
     },
@@ -1597,13 +1617,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "SKIPPED",
+            "fixCount": 0,
+            "summary": "SKIPPED (docs only) — tests/manual-checklist.md"
+          }
         }
       ]
     },
