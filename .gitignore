@@ -15,3 +15,12 @@ image copy 2.png
 
 # Local dev build binary
 /ccmux-light
+
+# Claude Code - shared configuration (symlinks)
+.claude/rules/workflow
+.claude/skills/dev
+.claude/commands/dev
+.claude/hooks/dev
+
+# Claude Code - local settings
+.claude/settings.local.json
