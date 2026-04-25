@@ -1234,11 +1234,16 @@ impl App {
         // has enabled mouse reporting AND we're on the live tail
         // (scroll_offset == 0), forward raw mouse events instead of
         // running the local selection / scrollbar logic.
-        if matches!(
-            mouse.kind,
-            MouseEventKind::Down(_) | MouseEventKind::Up(_) | MouseEventKind::Drag(_)
-                | MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-        )
+        // Skip while a border/split/scrollbar drag is in progress —
+        // otherwise dragging the tree/preview/split border rightward
+        // crosses into a pane area and the Drag event gets hijacked
+        // by the PTY, freezing the resize.
+        if self.dragging.is_none()
+            && matches!(
+                mouse.kind,
+                MouseEventKind::Down(_) | MouseEventKind::Up(_) | MouseEventKind::Drag(_)
+                    | MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            )
             && self.try_forward_mouse_to_pty(&mouse) {
                 return;
             }
