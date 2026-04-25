@@ -211,6 +211,17 @@ impl Perform for Performer<'_> {
     fn unhook(&mut self) {}
 
     fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        // CCMUX_TRACE_OSC=<path> で全 OSC をファイルに追記。
+        if let Some(path) = std::env::var_os("CCMUX_TRACE_OSC") {
+            use std::io::Write;
+            let pretty: Vec<String> = params
+                .iter()
+                .map(|p| String::from_utf8_lossy(p).into_owned())
+                .collect();
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                let _ = writeln!(f, "OSC params={pretty:?}");
+            }
+        }
         super::osc::dispatch(self.grid, params, self.events);
     }
 
@@ -270,7 +281,19 @@ impl Perform for Performer<'_> {
         }
     }
 
-    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
+    fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
+        // CCMUX_TRACE_ESC=<path> で ESC <intermediates> <final> をファイルに追記。
+        if let Some(path) = std::env::var_os("CCMUX_TRACE_ESC") {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                let _ = writeln!(
+                    f,
+                    "ESC intermediates={intermediates:?} byte={:#04x} ({})",
+                    byte,
+                    byte as char
+                );
+            }
+        }
         match byte {
             b'c' => {
                 // RIS: full reset.

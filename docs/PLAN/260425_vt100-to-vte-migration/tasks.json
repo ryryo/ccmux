@@ -7,11 +7,11 @@
     "createdDate": "2026-04-25",
     "specPath": "spec.md"
   },
-  "status": "in-progress",
+  "status": "in-review",
   "reviewChecked": false,
   "progress": {
-    "completed": 84,
-    "total": 90
+    "completed": 92,
+    "total": 92
   },
   "preflight": [],
   "gates": [
@@ -1683,13 +1683,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — src/, tests/, Cargo.toml, Cargo.lock, cargo tree いずれも vt100 残留ゼロ。pane.rs:143 の docstring 内の vt100 言及だけ vt parser に書き換え"
+          }
         }
       ]
     },
@@ -1720,13 +1724,17 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — CLAUDE.md の Tech Stack / Architecture / Key Design Decisions を vte ベースに更新、Debugging TUI rendering bugs セクションを追加。0_docs/cjk-cursor-bug-report.md §10 後日談で vte 移行と \\e[>4;2m bug を追記"
+          }
         }
       ]
     },
@@ -1757,13 +1765,68 @@
         {
           "kind": "impl",
           "title": "Step 1 — IMPL",
-          "checked": false
+          "checked": true
         },
         {
           "kind": "review",
           "title": "Step 2 — Review",
-          "checked": false,
-          "review": null
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 0,
+            "summary": "PASS — Cargo.toml / npm/package.json を 0.6.1 → 0.7.0 (minor bump)。docs/PLAN/260425_vt100-to-vte-migration/RELEASE_NOTES.md にハイライト/変更点/メトリクス/アップグレード手順を記載"
+          }
+        }
+      ]
+    },
+    {
+      "id": "H4",
+      "gate": "H",
+      "title": "TUI 横断スモークトレーステスト",
+      "description": "claude / vim / less / htop の実 PTY バイト列を採取し、新パーサに流して surprise (private intermediate 誤解釈、属性 leak 等) を回帰検出する基盤を整備",
+      "tdd": false,
+      "dependencies": [
+        "H3"
+      ],
+      "affectedFiles": [
+        {
+          "path": "tests/fixtures/capture_tui.py",
+          "operation": "create",
+          "summary": "汎用 PTY 採取スクリプト"
+        },
+        {
+          "path": "tests/snapshots/tui_traces/",
+          "operation": "create",
+          "summary": "採取した代表バイト列"
+        },
+        {
+          "path": "tests/tui_trace_test.rs",
+          "operation": "create",
+          "summary": "リプレイ + 不変条件アサート"
+        },
+        {
+          "path": "src/vt/parser.rs",
+          "operation": "modify",
+          "summary": "CCMUX_TRACE_OSC / CCMUX_TRACE_ESC opt-in トレース追加"
+        }
+      ],
+      "impl": "1) parser.rs::osc_dispatch / esc_dispatch にも CCMUX_TRACE_CSI 同様の opt-in トレースを追加。2) tests/fixtures/capture_tui.py — pty.fork() で対象 CLI を起動 → 数キー送って終了 → バイト列を tests/snapshots/tui_traces/{name}.bin に保存。3) tests/tui_trace_test.rs — 各 .bin を Terminal::new + process し、(a) 終了時の cursor.style.bits が 0 系で残留していないか、(b) 想定外の private intermediate 経路が踏まれていないか、(c) visible 行を render_grid で textual 化して .txt と diff する。CI で常時走らせる。",
+      "relatedIssues": [],
+      "steps": [
+        {
+          "kind": "impl",
+          "title": "Step 1 — IMPL",
+          "checked": true
+        },
+        {
+          "kind": "review",
+          "title": "Step 2 — Review",
+          "checked": true,
+          "review": {
+            "result": "PASSED",
+            "fixCount": 1,
+            "summary": "PASS — CCMUX_TRACE_OSC / CCMUX_TRACE_ESC を CSI と対称に追加。tests/fixtures/capture_tui.py で claude/vim/less を採取 (htop は環境に無く skip)。tests/tui_trace_test.rs で 5 ケース回帰防御 (各 trace で pen leak ゼロ + alt-screen 復帰 + xterm modifyOtherKeys isolation)。最初の vim/less 採取で alt-screen exit を取りこぼしていた drain ロジックを修正"
+          }
         }
       ]
     }

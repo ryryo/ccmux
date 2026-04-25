@@ -202,3 +202,18 @@ CCMUX_DEBUG_LOG=/tmp/ccmux.log ccmux
 - [UAX #11: East Asian Width](http://www.unicode.org/reports/tr11/)
 - [Mitchell Hashimoto — Grapheme Clusters and Terminal Emulators](https://mitchellh.com/writing/grapheme-clusters-in-terminals)
 - [wezterm — treat_east_asian_ambiguous_width_as_wide](https://wezterm.org/config/lua/config/treat_east_asian_ambiguous_width_as_wide.html)
+
+## 10. 後日談 (2026-04-25)
+
+vt100 crate は本レポートで触れた CJK 幅処理だけでなく、scroll region (DECSTBM)
+有効時に scrollback を保存しないという別の構造的制約があり、Claude Code で
+ホイール遡行が一切効かない問題を引き起こしていた。これを根本解決するため
+`vte` パーサ + 自前 Grid/Scrollback への big-bang 置換を実施
+(`docs/PLAN/260425_vt100-to-vte-migration/`)。CJK 幅は `unicode-width` crate で
+再実装し、本レポートの -1 補正は撤去 (commit `b67fe9d` を維持)。
+
+移行中、Claude Code が起動時に出す `\e[>4;2m` (xterm modifyOtherKeys) を SGR と
+誤解釈して画面全体に下線が乗るバグを別途検出 → 根本原因 (ECMA-48 §5.4 の
+intermediate byte 識別漏れ) を [`pty-byte-trace-debugging.md`](./pty-byte-trace-debugging.md)
+の手順で特定し commit `668b190` で fix。同種バグの回帰検出は
+`tests/tui_trace_test.rs` で claude/vim/less の実バイト列をリプレイして行う。

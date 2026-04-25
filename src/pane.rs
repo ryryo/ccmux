@@ -140,7 +140,7 @@ impl Pane {
         Ok(())
     }
 
-    /// Resize the PTY and vt100 parser. Returns `true` if the size
+    /// Resize the PTY and the vt parser. Returns `true` if the size
     /// actually changed (useful for callers that want to know whether
     /// a SIGWINCH was sent to the child). No-op and returns `false`
     /// when the size hasn't changed.

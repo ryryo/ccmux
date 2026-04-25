@@ -470,12 +470,14 @@ Gate H: クリーンアップ・ドキュメント（Gate G 完了後）
 
 > vt100 依存削除確認、CLAUDE.md とバグレポートの追記
 
-- [ ] **H1**: [SIMPLE] vt100 依存の最終削除確認
-  > **Review H1**: _未記入_
-- [ ] **H2**: [SIMPLE] CLAUDE.md と cjk-cursor-bug-report 追記
-  > **Review H2**: _未記入_
-- [ ] **H3**: [SIMPLE] バージョン bump とリリースノート下書き
-  > **Review H3**: _未記入_
+- [x] **H1**: [SIMPLE] vt100 依存の最終削除確認
+  > **Review H1**: ✅ PASSED — PASS — src/, tests/, Cargo.toml, Cargo.lock, cargo tree いずれも vt100 残留ゼロ。pane.rs:143 の docstring 内の vt100 言及だけ vt parser に書き換え
+- [x] **H2**: [SIMPLE] CLAUDE.md と cjk-cursor-bug-report 追記
+  > **Review H2**: ✅ PASSED — PASS — CLAUDE.md の Tech Stack / Architecture / Key Design Decisions を vte ベースに更新、Debugging TUI rendering bugs セクションを追加。0_docs/cjk-cursor-bug-report.md §10 後日談で vte 移行と \e[>4;2m bug を追記
+- [x] **H3**: [SIMPLE] バージョン bump とリリースノート下書き
+  > **Review H3**: ✅ PASSED — PASS — Cargo.toml / npm/package.json を 0.6.1 → 0.7.0 (minor bump)。docs/PLAN/260425_vt100-to-vte-migration/RELEASE_NOTES.md にハイライト/変更点/メトリクス/アップグレード手順を記載
+- [x] **H4**: TUI 横断スモークトレーステスト
+  > **Review H4**: ✅ PASSED (FIX 1回) — PASS — CCMUX_TRACE_OSC / CCMUX_TRACE_ESC を CSI と対称に追加。tests/fixtures/capture_tui.py で claude/vim/less を採取 (htop は環境に無く skip)。tests/tui_trace_test.rs で 5 ケース回帰防御 (各 trace で pen leak ゼロ + alt-screen 復帰 + xterm modifyOtherKeys isolation)。最初の vim/less 採取で alt-screen exit を取りこぼしていた drain ロジックを修正
 
 **Gate H 通過条件**: 全 Review 結果記入欄が埋まり、総合判定が PASS であること
 
