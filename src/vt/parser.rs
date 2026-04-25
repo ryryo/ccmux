@@ -221,6 +221,20 @@ impl Perform for Performer<'_> {
         _ignore: bool,
         action: char,
     ) {
+        // CCMUX_TRACE_CSI=<path> で全 CSI 'm' をファイルに追記。診断用。
+        if action == 'm' {
+            if let Some(path) = std::env::var_os("CCMUX_TRACE_CSI") {
+                use std::io::Write;
+                let pretty: Vec<Vec<u16>> = params.iter().map(|g| g.to_vec()).collect();
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                    let _ = writeln!(
+                        f,
+                        "CSI m intermediates={intermediates:?} params={pretty:?} underline_before={}",
+                        self.grid.cursor.style.contains(super::cell::CellAttrs::UNDERLINE)
+                    );
+                }
+            }
+        }
         if intermediates.first() == Some(&b'?') {
             match action {
                 'h' => super::csi::dispatch_private_mode(self.grid, params, true),
@@ -230,6 +244,21 @@ impl Perform for Performer<'_> {
             return;
         }
         super::csi::dispatch(self.grid, params, action);
+        if action == 'm' {
+            if let Some(path) = std::env::var_os("CCMUX_TRACE_CSI") {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                    let _ = writeln!(
+                        f,
+                        "  → underline_after={} bits={:#06x} fg={:?} bg={:?}",
+                        self.grid.cursor.style.contains(super::cell::CellAttrs::UNDERLINE),
+                        self.grid.cursor.style.bits,
+                        self.grid.cursor.fg,
+                        self.grid.cursor.bg,
+                    );
+                }
+            }
+        }
     }
 
     fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
