@@ -562,28 +562,13 @@ fn render_terminal_content(
     let show_cursor = is_focused && (!screen.hide_cursor() || pane.is_claude_running());
     if show_cursor {
         let cursor = screen.cursor_position();
-        // For Claude Code, shift cursor 1 column left because Claude draws its own
-        // block character at the cursor position, and the PTY cursor would otherwise
-        // appear one column after with a visible gap.
-        // Exception: if the previous cell is a wide-character continuation (i.e. the
-        // right half of a CJK glyph), shifting -1 lands the cursor on top of that
-        // half and visually mangles the glyph. Keep the cursor at its native column
-        // in that case.
-        let cursor_x = if pane.is_claude_running() {
-            let col = cursor.1;
-            let prev_is_wide_cont = col > 0
-                && screen
-                    .cell(cursor.0, col - 1)
-                    .map(|c| c.is_wide_continuation())
-                    .unwrap_or(false);
-            if prev_is_wide_cont {
-                area.x + col
-            } else {
-                area.x + col.saturating_sub(1)
-            }
-        } else {
-            area.x + cursor.1
-        };
+        // Place the OS cursor at the position the PTY reports. Modern Ink-based
+        // TUIs (Claude Code) want the physical cursor at the logical input
+        // position so that IME candidate windows align correctly. A previous
+        // -1 shift (intended to overlap Claude's own block glyph) caused CJK
+        // glyphs to be visually mangled; removing it follows the convention
+        // used by other multiplexers (Zellij, etc.).
+        let cursor_x = area.x + cursor.1;
         let cursor_y = area.y + cursor.0;
         if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
             frame.set_cursor_position((cursor_x, cursor_y));
