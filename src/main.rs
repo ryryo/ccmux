@@ -3,6 +3,7 @@ mod claude_monitor;
 mod config;
 mod debug_log;
 mod filetree;
+mod keymap;
 mod mouse_encode;
 mod pane;
 mod preview;

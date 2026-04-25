@@ -1,5 +1,6 @@
 use serde::Deserialize;
 
+use crate::keymap::KeybindingsCfg;
 use crate::theme::ThemeMode;
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -10,6 +11,8 @@ pub struct Config {
     pub osc52: Osc52Cfg,
     #[serde(default)]
     pub theme: ThemeCfg,
+    #[serde(default)]
+    pub keybindings: KeybindingsCfg,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

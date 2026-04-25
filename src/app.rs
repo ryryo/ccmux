@@ -50,6 +50,32 @@ pub enum DragTarget {
     Scrollbar(usize, Rect), // pane_id, inner area
 }
 
+/// Result of dispatching a [`crate::keymap::Action`].
+/// `Passthrough` means the action declined to handle the key (e.g.
+/// `CopySelectionOrPassthrough` with no active selection); the caller
+/// should then fall through to the next handler (PTY, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActionResult {
+    Consumed,
+    Passthrough,
+}
+
+/// Normalize a [`KeyEvent`] into a [`crate::keymap::KeyChord`] for
+/// lookup. ASCII letters are lowercased and SHIFT is stripped from
+/// `Char` keys (case already encodes shift), so `"alt+r"` in config
+/// matches both `Alt+r` and `Alt+Shift+R`.
+fn normalize_chord(key: KeyEvent) -> crate::keymap::KeyChord {
+    let mut mods = key.modifiers;
+    let code = match key.code {
+        KeyCode::Char(c) => {
+            mods.remove(KeyModifiers::SHIFT);
+            KeyCode::Char(c.to_ascii_lowercase())
+        }
+        other => other,
+    };
+    crate::keymap::KeyChord::new(mods, code)
+}
+
 // ─── Layout Tree ──────────────────────────────────────────
 
 /// Binary tree node for pane layout.
@@ -404,6 +430,8 @@ pub struct App {
     pub config: crate::config::Config,
     // Resolved color theme (derived from config.theme.mode at startup)
     pub theme: crate::theme::Theme,
+    // Resolved key bindings (defaults + user overrides from config)
+    pub keymap: crate::keymap::KeyMap,
 }
 
 impl App {
@@ -417,6 +445,8 @@ impl App {
         let name = dir_name(&cwd);
 
         let theme = crate::theme::Theme::from_mode(config.theme.mode);
+        let mut keymap = crate::keymap::KeyMap::defaults();
+        keymap.apply_user(&config.keybindings);
         let mut ws = Workspace::new(name, cwd, 1, pane_rows, pane_cols, event_tx.clone(), config.scrollback.max_lines)?;
         ws.preview.set_syntect_theme(theme.syntect_theme);
 
@@ -454,6 +484,7 @@ impl App {
             image_picker: None,
             theme,
             config,
+            keymap,
         })
     }
 
@@ -585,115 +616,7 @@ impl App {
             return Ok(self.handle_rename_key(key));
         }
 
-        // Ctrl+Q — quit
-        if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('q') {
-            self.should_quit = true;
-            return Ok(true);
-        }
-
-        // Alt+R — rename active tab (session only)
-        if key.modifiers == KeyModifiers::ALT
-            && matches!(key.code, KeyCode::Char('r') | KeyCode::Char('R'))
-        {
-            self.rename_input = Some(String::new());
-            if !self.status_bar_visible {
-                self.mark_layout_change();
-            }
-            return Ok(true);
-        }
-
-        // E6: Esc on a focused pane — if a selection is live or the
-        // pane is scrolled back, clear those local UI states and
-        // swallow the key. Otherwise let Esc propagate to the PTY.
-        if key.code == KeyCode::Esc && key.modifiers == KeyModifiers::NONE
-            && self.ws().focus_target == FocusTarget::Pane
-        {
-            let mut handled = false;
-            if self.selection.is_some() {
-                self.selection = None;
-                handled = true;
-            }
-            let focused_id = self.ws().focused_pane_id;
-            if let Some(pane) = self.ws().panes.get(&focused_id) {
-                if pane.is_scrolled_back() {
-                    pane.scroll_reset();
-                    handled = true;
-                }
-            }
-            if handled {
-                self.dirty = true;
-                return Ok(true);
-            }
-        }
-
-        // Ctrl+C — if text is selected, copy to clipboard instead of sending SIGINT
-        if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('c') {
-            if let Some(ref sel) = self.selection.clone() {
-                let (sr, sc, er, ec) = sel.normalized();
-                if sr != er || sc != ec {
-                    let text = match sel.target {
-                        SelectionTarget::Pane(pane_id) => self
-                            .ws()
-                            .panes
-                            .get(&pane_id)
-                            .map(|p| extract_selected_text(p, sr, sc, er, ec))
-                            .unwrap_or_default(),
-                        SelectionTarget::Preview => extract_preview_selected_text(
-                            &self.ws().preview,
-                            sr,
-                            sc,
-                            er,
-                            ec,
-                        ),
-                    };
-                    if !text.is_empty() {
-                        self.copy_to_clipboard(&text);
-                    }
-                    self.selection = None;
-                    return Ok(true);
-                }
-            }
-            // No selection — fall through to forward Ctrl+C to PTY
-        }
-
-        // Ctrl+T / Alt+T — new tab (Alt+T groups with Alt-based tab nav)
-        if (key.modifiers == KeyModifiers::CONTROL || key.modifiers == KeyModifiers::ALT)
-            && matches!(key.code, KeyCode::Char('t') | KeyCode::Char('T'))
-        {
-            self.new_tab()?;
-            return Ok(true);
-        }
-
-        // Alt+Right — next tab
-        if key.modifiers == KeyModifiers::ALT && key.code == KeyCode::Right {
-            if !self.workspaces.is_empty() {
-                self.active_tab = (self.active_tab + 1) % self.workspaces.len();
-            }
-            return Ok(true);
-        }
-
-        // Alt+Left — previous tab
-        if key.modifiers == KeyModifiers::ALT && key.code == KeyCode::Left {
-            if !self.workspaces.is_empty() {
-                self.active_tab = if self.active_tab == 0 {
-                    self.workspaces.len() - 1
-                } else {
-                    self.active_tab - 1
-                };
-            }
-            return Ok(true);
-        }
-
-        // Alt+S — toggle status bar
-        if key.modifiers == KeyModifiers::ALT
-            && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S'))
-        {
-            self.status_bar_visible = !self.status_bar_visible;
-            self.mark_layout_change();
-            return Ok(true);
-        }
-
-        // Alt+1 .. Alt+9 — jump to tab N
+        // Alt+1 .. Alt+9 — jump to tab N (intentionally non-configurable).
         if key.modifiers == KeyModifiers::ALT {
             if let KeyCode::Char(c) = key.code {
                 if let Some(digit) = c.to_digit(10) {
@@ -705,73 +628,236 @@ impl App {
             }
         }
 
-        // Ctrl+Right — next pane
-        if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Right {
-            self.focus_next_pane();
+        let chord = normalize_chord(key);
+
+        // Global scope first — works regardless of focus.
+        if let Some(action) = self.keymap.lookup(crate::keymap::Scope::Global, chord) {
+            match self.dispatch_action(action)? {
+                ActionResult::Consumed => return Ok(true),
+                ActionResult::Passthrough => {}
+            }
+        }
+
+        // Scope-specific lookup based on current focus.
+        let scope = match self.ws().focus_target {
+            FocusTarget::Pane => crate::keymap::Scope::Pane,
+            FocusTarget::FileTree => crate::keymap::Scope::FileTree,
+            FocusTarget::Preview => crate::keymap::Scope::Preview,
+        };
+        if let Some(action) = self.keymap.lookup(scope, chord) {
+            match self.dispatch_action(action)? {
+                ActionResult::Consumed => return Ok(true),
+                ActionResult::Passthrough => return Ok(false),
+            }
+        }
+
+        // Preview / FileTree focus swallows unmatched keys (legacy behavior:
+        // arrow keys etc. shouldn't fall through to the PTY in those modes).
+        if matches!(
+            self.ws().focus_target,
+            FocusTarget::Preview | FocusTarget::FileTree
+        ) {
             return Ok(true);
         }
 
-        // Ctrl+Left — previous pane
-        if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Left {
-            self.focus_prev_pane();
-            return Ok(true);
-        }
+        Ok(false)
+    }
 
-        // Preview mode
-        if self.ws().focus_target == FocusTarget::Preview {
-            return self.handle_preview_key(key);
-        }
-
-        // File tree mode
-        if self.ws().focus_target == FocusTarget::FileTree {
-            if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('f') {
+    fn dispatch_action(&mut self, action: crate::keymap::Action) -> Result<ActionResult> {
+        use crate::keymap::Action as A;
+        Ok(match action {
+            A::Quit => {
+                self.should_quit = true;
+                ActionResult::Consumed
+            }
+            A::NewTab => {
+                self.new_tab()?;
+                ActionResult::Consumed
+            }
+            A::NextTab => {
+                if !self.workspaces.is_empty() {
+                    self.active_tab = (self.active_tab + 1) % self.workspaces.len();
+                }
+                ActionResult::Consumed
+            }
+            A::PrevTab => {
+                if !self.workspaces.is_empty() {
+                    self.active_tab = if self.active_tab == 0 {
+                        self.workspaces.len() - 1
+                    } else {
+                        self.active_tab - 1
+                    };
+                }
+                ActionResult::Consumed
+            }
+            A::RenameTab => {
+                self.rename_input = Some(String::new());
+                if !self.status_bar_visible {
+                    self.mark_layout_change();
+                }
+                ActionResult::Consumed
+            }
+            A::ToggleStatusBar => {
+                self.status_bar_visible = !self.status_bar_visible;
+                self.mark_layout_change();
+                ActionResult::Consumed
+            }
+            A::ToggleFileTree => {
                 self.toggle_file_tree();
-                return Ok(true);
+                ActionResult::Consumed
             }
-            return self.handle_file_tree_key(key);
-        }
-
-        // Ctrl+F — toggle file tree
-        if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('f') {
-            self.toggle_file_tree();
-            return Ok(true);
-        }
-
-        // Ctrl+P — swap preview and terminal positions
-        if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('p') {
-            self.layout_swapped = !self.layout_swapped;
-            return Ok(true);
-        }
-
-        let multi_pane = self.ws().layout.pane_count() > 1;
-        let multi_tab = self.workspaces.len() > 1;
-
-        match (key.modifiers, key.code) {
-            (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+            A::SwapLayout => {
+                self.layout_swapped = !self.layout_swapped;
+                ActionResult::Consumed
+            }
+            A::FocusNextPane => {
+                self.focus_next_pane();
+                ActionResult::Consumed
+            }
+            A::FocusPrevPane => {
+                self.focus_prev_pane();
+                ActionResult::Consumed
+            }
+            A::CopySelectionOrPassthrough => self.action_copy_selection_or_passthrough(),
+            A::SplitVertical => {
                 self.split_focused_pane(SplitDirection::Vertical)?;
-                Ok(true)
+                ActionResult::Consumed
             }
-            (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
+            A::SplitHorizontal => {
                 self.split_focused_pane(SplitDirection::Horizontal)?;
-                Ok(true)
+                ActionResult::Consumed
             }
-            (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
-                if self.ws().focus_target == FocusTarget::Preview {
-                    // Close preview and return to pane
-                    self.ws_mut().preview.close();
-                    self.ws_mut().focus_target = FocusTarget::Pane;
-                    Ok(true)
-                } else if multi_pane {
+            A::ClosePaneOrTab => {
+                let multi_pane = self.ws().layout.pane_count() > 1;
+                let multi_tab = self.workspaces.len() > 1;
+                if multi_pane {
                     self.close_focused_pane();
-                    Ok(true)
+                    ActionResult::Consumed
                 } else if multi_tab {
                     self.close_tab(self.active_tab);
-                    Ok(true)
+                    ActionResult::Consumed
                 } else {
-                    Ok(false)
+                    ActionResult::Passthrough
                 }
             }
-            _ => Ok(false),
+            A::ClearSelectionOrPassthrough => self.action_clear_selection_or_passthrough(),
+            A::FileTreeDown => {
+                self.ws_mut().file_tree.move_down();
+                ActionResult::Consumed
+            }
+            A::FileTreeUp => {
+                self.ws_mut().file_tree.move_up();
+                ActionResult::Consumed
+            }
+            A::FileTreeOpen => {
+                let path = self.ws_mut().file_tree.toggle_or_select();
+                if let Some(path) = path {
+                    self.clear_selection_if_preview();
+                    let mut picker = self.image_picker.take();
+                    self.ws_mut().preview.load(&path, picker.as_mut());
+                    self.image_picker = picker;
+                }
+                ActionResult::Consumed
+            }
+            A::FileTreeToggleHidden => {
+                self.ws_mut().file_tree.toggle_hidden();
+                ActionResult::Consumed
+            }
+            A::FileTreeBlur => {
+                self.ws_mut().focus_target = FocusTarget::Pane;
+                ActionResult::Consumed
+            }
+            A::PreviewScrollDown => {
+                self.ws_mut().preview.scroll_down(1);
+                ActionResult::Consumed
+            }
+            A::PreviewScrollUp => {
+                self.ws_mut().preview.scroll_up(1);
+                ActionResult::Consumed
+            }
+            A::PreviewPageDown => {
+                self.ws_mut().preview.scroll_down(20);
+                ActionResult::Consumed
+            }
+            A::PreviewPageUp => {
+                self.ws_mut().preview.scroll_up(20);
+                ActionResult::Consumed
+            }
+            A::PreviewScrollLeft => {
+                self.ws_mut().preview.scroll_left(4);
+                ActionResult::Consumed
+            }
+            A::PreviewScrollRight => {
+                self.ws_mut().preview.scroll_right(4);
+                ActionResult::Consumed
+            }
+            A::PreviewScrollHome => {
+                self.ws_mut().preview.h_scroll_offset = 0;
+                ActionResult::Consumed
+            }
+            A::PreviewClose => {
+                self.clear_selection_if_preview();
+                self.ws_mut().preview.close();
+                self.ws_mut().focus_target = FocusTarget::Pane;
+                ActionResult::Consumed
+            }
+            A::PreviewBlur => {
+                self.ws_mut().focus_target = FocusTarget::Pane;
+                ActionResult::Consumed
+            }
+        })
+    }
+
+    fn action_copy_selection_or_passthrough(&mut self) -> ActionResult {
+        if let Some(ref sel) = self.selection.clone() {
+            let (sr, sc, er, ec) = sel.normalized();
+            if sr != er || sc != ec {
+                let text = match sel.target {
+                    SelectionTarget::Pane(pane_id) => self
+                        .ws()
+                        .panes
+                        .get(&pane_id)
+                        .map(|p| extract_selected_text(p, sr, sc, er, ec))
+                        .unwrap_or_default(),
+                    SelectionTarget::Preview => extract_preview_selected_text(
+                        &self.ws().preview,
+                        sr,
+                        sc,
+                        er,
+                        ec,
+                    ),
+                };
+                if !text.is_empty() {
+                    self.copy_to_clipboard(&text);
+                }
+                self.selection = None;
+                return ActionResult::Consumed;
+            }
+        }
+        ActionResult::Passthrough
+    }
+
+    fn action_clear_selection_or_passthrough(&mut self) -> ActionResult {
+        // E6: Esc on a focused pane — if a selection is live or the
+        // pane is scrolled back, clear those local UI states and swallow
+        // the key. Otherwise let Esc propagate to the PTY.
+        let mut handled = false;
+        if self.selection.is_some() {
+            self.selection = None;
+            handled = true;
+        }
+        let focused_id = self.ws().focused_pane_id;
+        if let Some(pane) = self.ws().panes.get(&focused_id) {
+            if pane.is_scrolled_back() {
+                pane.scroll_reset();
+                handled = true;
+            }
+        }
+        if handled {
+            self.dirty = true;
+            ActionResult::Consumed
+        } else {
+            ActionResult::Passthrough
         }
     }
 
@@ -810,105 +896,6 @@ impl App {
         }
         self.dirty = true;
         true
-    }
-
-    fn handle_file_tree_key(&mut self, key: KeyEvent) -> Result<bool> {
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.ws_mut().file_tree.move_down();
-                Ok(true)
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.ws_mut().file_tree.move_up();
-                Ok(true)
-            }
-            KeyCode::Enter => {
-                let path = self.ws_mut().file_tree.toggle_or_select();
-                if let Some(path) = path {
-                    self.clear_selection_if_preview();
-                    let mut picker = self.image_picker.take();
-                    self.ws_mut().preview.load(&path, picker.as_mut());
-                    self.image_picker = picker;
-                }
-                Ok(true)
-            }
-            KeyCode::Char('.') => {
-                self.ws_mut().file_tree.toggle_hidden();
-                Ok(true)
-            }
-            KeyCode::Esc => {
-                // Return to pane, keep preview open
-                self.ws_mut().focus_target = FocusTarget::Pane;
-                Ok(true)
-            }
-            _ => Ok(true),
-        }
-    }
-
-    fn handle_preview_key(&mut self, key: KeyEvent) -> Result<bool> {
-        match (key.modifiers, key.code) {
-            (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
-                self.clear_selection_if_preview();
-                self.ws_mut().preview.close();
-                self.ws_mut().focus_target = FocusTarget::Pane;
-                Ok(true)
-            }
-            (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
-                self.layout_swapped = !self.layout_swapped;
-                Ok(true)
-            }
-            (_, KeyCode::Char('j')) | (_, KeyCode::Down) => {
-                self.ws_mut().preview.scroll_down(1);
-                Ok(true)
-            }
-            (_, KeyCode::Char('k')) | (_, KeyCode::Up) => {
-                self.ws_mut().preview.scroll_up(1);
-                Ok(true)
-            }
-            (_, KeyCode::PageDown) => {
-                self.ws_mut().preview.scroll_down(20);
-                Ok(true)
-            }
-            (_, KeyCode::PageUp) => {
-                self.ws_mut().preview.scroll_up(20);
-                Ok(true)
-            }
-            // Horizontal scroll — unmodified arrow keys and vim-style h/l.
-            // Ctrl+Left/Right remain focus navigation (matched below).
-            (KeyModifiers::NONE, KeyCode::Right)
-            | (KeyModifiers::NONE, KeyCode::Char('l'))
-            | (KeyModifiers::SHIFT, KeyCode::Right) => {
-                self.ws_mut().preview.scroll_right(4);
-                Ok(true)
-            }
-            (KeyModifiers::NONE, KeyCode::Left)
-            | (KeyModifiers::NONE, KeyCode::Char('h'))
-            | (KeyModifiers::SHIFT, KeyCode::Left) => {
-                self.ws_mut().preview.scroll_left(4);
-                Ok(true)
-            }
-            (KeyModifiers::NONE, KeyCode::Home) => {
-                self.ws_mut().preview.h_scroll_offset = 0;
-                Ok(true)
-            }
-            (_, KeyCode::Esc) => {
-                self.ws_mut().focus_target = FocusTarget::Pane;
-                Ok(true)
-            }
-            (KeyModifiers::CONTROL, KeyCode::Char('q')) => {
-                self.should_quit = true;
-                Ok(true)
-            }
-            (KeyModifiers::CONTROL, KeyCode::Right) => {
-                self.focus_next_pane();
-                Ok(true)
-            }
-            (KeyModifiers::CONTROL, KeyCode::Left) => {
-                self.focus_prev_pane();
-                Ok(true)
-            }
-            _ => Ok(true),
-        }
     }
 
     // ─── Tab management ───────────────────────────────────

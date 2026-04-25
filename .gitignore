@@ -16,6 +16,9 @@ image copy 2.png
 # Local dev build binary
 /ccmux-light
 
+# Symlink to ~/.config/ccmux/config.toml for easier editing
+/config.toml
+
 # Claude Code - shared configuration (symlinks)
 .claude/rules/workflow
 .claude/skills/dev
